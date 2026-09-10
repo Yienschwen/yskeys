@@ -225,6 +225,52 @@ export function median(values: readonly number[]): number | null {
   return lower === undefined || upper === undefined ? null : (lower + upper) / 2;
 }
 
+export interface UnitRow {
+  readonly unit: string;
+  readonly metric: Metric;
+  /** Raw accuracy: what actually happened, with no prior mixed in. */
+  readonly accuracy: number;
+  readonly errors: number;
+  readonly attempts: number;
+}
+
+/**
+ * Rows for the history tables. Unlike `weakestUnits`, perfect units are kept: the
+ * point of the history view is to be able to sort and see the strong keys too.
+ */
+export function unitRows(map: Readonly<Record<string, Metric>>): UnitRow[] {
+  return Object.entries(map).map(([unit, metric]) => ({
+    unit,
+    metric,
+    accuracy: metric.attempts === 0 ? 0 : metric.firstTryCorrect / metric.attempts,
+    errors: metric.attempts - metric.firstTryCorrect,
+    attempts: metric.attempts,
+  }));
+}
+
+export type UnitSortKey = 'accuracy' | 'errors' | 'samples';
+export type SortDirection = 'asc' | 'desc';
+
+export function sortUnitRows(
+  rows: readonly UnitRow[],
+  key: UnitSortKey,
+  direction: SortDirection,
+): UnitRow[] {
+  const factor = direction === 'asc' ? 1 : -1;
+  const valueOf = (row: UnitRow): number =>
+    key === 'samples' ? row.attempts : key === 'errors' ? row.errors : row.accuracy;
+
+  return [...rows].sort((a, b) => {
+    const left = valueOf(a);
+    const right = valueOf(b);
+    if (left !== right) {
+      return (left - right) * factor;
+    }
+    // Deterministic tie-break, so the table does not reshuffle between renders.
+    return b.attempts - a.attempts || a.unit.localeCompare(b.unit);
+  });
+}
+
 /**
  * Units worth practising, worst first. Units with no misses are excluded on
  * purpose: calling a 1-sample perfect unit "the weakest" would be a lie, so a

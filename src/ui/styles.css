@@ -507,6 +507,17 @@ ul {
   border-color: var(--accent-hover);
 }
 
+/* Declared after .button:hover so the danger hover wins on equal specificity. */
+.button--danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.button--danger:hover {
+  background: var(--error-subtle);
+  border-color: var(--error);
+}
+
 .button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -580,6 +591,201 @@ ul {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* ------------------------------------------------------------- 5g. banner */
+
+.banner-host:empty {
+  display: none;
+}
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  border-bottom: var(--border-w) solid var(--border);
+  border-left: 3px solid var(--border-strong);
+}
+
+.banner--info {
+  background: var(--accent-subtle);
+  border-left-color: var(--accent);
+}
+
+.banner--warning {
+  background: var(--warning-subtle);
+  border-left-color: var(--warning);
+}
+
+.banner--error {
+  background: var(--error-subtle);
+  border-left-color: var(--error);
+}
+
+.banner__message {
+  flex: 1 1 20rem;
+  font-size: var(--text-md);
+}
+
+.banner__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ----------------------------------------------------------- 5h. settings */
+
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+.header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.field__label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.select,
+.input,
+.textarea {
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+
+.textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  resize: vertical;
+}
+
+.select:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible {
+  border-color: var(--accent-border);
+}
+
+/* -------------------------------------------------------------- 5i. chart */
+
+.chart {
+  display: block;
+}
+
+.chart__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 12rem;
+}
+
+.chart__baseline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chart__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.chart__dot {
+  fill: var(--accent);
+}
+
+/* ---------------------------------------------------------- 5j. dialogs */
+
+.dialog {
+  max-width: 32rem;
+  padding: 0;
+  background: var(--bg);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+
+.dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.dialog__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.dialog__text {
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+
+.dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* --------------------------------------------------- 5k. tables and chips */
+
+.table__sort {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.table__sort:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* No flex here on purpose: the footer is toggled with the `hidden` attribute. */
+.table__footer {
+  margin-block-start: var(--space-2);
+}
+
+.tag--warning {
+  color: var(--warning);
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
 }
 
 /* --------------------------------------------------------- 6. media rules */

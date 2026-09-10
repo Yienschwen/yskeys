@@ -36,6 +36,9 @@ export const TRIGRAM_DISPLAY_MIN_ATTEMPTS = 3;
 /** Rows shown per weak-spot table before "show all" (PROJECT.md F7). */
 export const WEAK_TABLE_LIMIT = 15;
 
+/** Below this many attempts a unit is flagged "low sample" in history (PROJECT.md F6). */
+export const LOW_SAMPLE_ATTEMPTS = 10;
+
 /** Weakest units listed on the session result view (PROJECT.md F3). */
 export const RESULT_WEAK_LIMIT = 5;
 

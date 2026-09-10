@@ -58,5 +58,9 @@ otherwise every built asset 404s on the Pages subpath.
 ## Data
 
 Nothing is uploaded and there is no analytics. Typing history stays in this browser's
-`localStorage`; export/import (JSON) arrives with M2. See `PROJECT.md` §4 for what this
+`localStorage`; export/import (JSON) is in the History view. See `PROJECT.md` §4 for what this
 project deliberately does not do.
+
+**Use one origin consistently.** The custom domain answers on both `http://` and `https://`, and a
+browser treats those as two different origins with two separate `localStorage` stores. Type on both
+and you will appear to have two unrelated histories. Pick `https://` and stay there.

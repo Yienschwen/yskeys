@@ -78,13 +78,16 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
   → symbols). All units equally bad → degenerates to near-uniform, which is acceptable. `uniform`
   mode is available as an A/B control and must stay working.
 
-### F6 — Accuracy definitions (`acc_smoothed`)
-- **Trigger**: display and weighting.
-- **Normal**: `acc = (firstTryCorrect + 5×0.9) / (attempts + 5)` — Beta prior so one attempt cannot
-  produce 0% or 100%. Bigram first-try correct requires **both** positions first-try correct.
-  Display the sample size next to every number.
-- **Exceptions**: `n < 10` → flagged "low sample" in the weak-spot table. Bigram accuracy is
-  dominated by its two characters; `lift = acc2 / (acc1(x)·acc1(y))` is **recorded from day one**
+### F6 — Accuracy definitions
+- **Trigger**: weighting (M3). The history tables deliberately show **raw** accuracy instead.
+- **Normal**: the stored record is a raw count. Weighting uses
+  `acc_smoothed = (firstTryCorrect + 5×0.9) / (attempts + 5)` — a Beta prior so one attempt cannot
+  produce 0% or 100%. An n-gram's first try counts as correct only if **every** position in it was
+  correct on its first attempt.
+- **Exceptions**: `n < 10` → flagged "low sample" in the history tables, which always print the
+  sample size next to the number. Smoothing is kept out of those tables on purpose: showing a 0-of-1
+  key as 75% would misrepresent what actually happened. Bigram accuracy is dominated by its two
+  characters; `lift = acc2 / (acc1(x)·acc1(y))` is **recorded from day one**
   and only used for weighting in v1.1 (so no data migration is needed later).
 
 ### F7 — History and weak-spot view
@@ -113,8 +116,9 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 ### F10 — Settings
 - **Trigger**: charset / length / mode controls in the header.
 - **Normal**: charsets = lowercase (default on), uppercase, digits, punctuation, programming symbols.
-  Length 15 / 30 (default) / 60 groups. Mode `adaptive` (default) / `uniform`. Changes apply to the
-  **next** session, never mid-session.
+  Length 15 / 30 (default) / 60 groups. Mode `adaptive` (default) / `uniform`; the mode control
+  appears with M3, when both modes actually exist. Changes apply to the **next** session, never
+  mid-session.
 - **Exceptions**: turning off all charsets is prevented at the UI level. Settings persist alongside
   history and are included in the export.
 
@@ -188,7 +192,8 @@ yskeys/
    ├─ vite-env.d.ts    # Vite ambient types (asset imports)
    ├─ core/            # pure, no DOM: charset, random, generator, engine, metrics, layout (+ adaptive)
    ├─ store/           # schema (+validators), migrations, aggregate, persistence, transfer
-   ├─ ui/              # dom, format, stat, typing-view, result-view, styles.css (+ banner, chart, history)
+   ├─ ui/              # dom, format, stat, banner, chart, dialogs, settings-controls,
+   │                   # typing-view, result-view, history-view, styles.css
    └─ test/            # invariant tests for core/ and store/
 ```
 

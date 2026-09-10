@@ -1,5 +1,6 @@
 import { applyEvent, createSession } from '../core/engine';
 import type { SessionState } from '../core/engine';
+import type { StorageLike } from '../store/persistence';
 
 /** Shared test helpers. Not a test file: vitest matches only `*.test.ts`. */
 
@@ -23,3 +24,45 @@ export function playState(
   }
   return state;
 }
+
+/** A working storage that never touches the real localStorage. */
+export class MemoryStorage implements StorageLike {
+  private readonly data = new Map<string, string>();
+
+  get length(): number {
+    return this.data.size;
+  }
+
+  getItem(key: string): string | null {
+    return this.data.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.data.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.data.delete(key);
+  }
+
+  key(index: number): string | null {
+    return [...this.data.keys()][index] ?? null;
+  }
+}
+
+/** Storage that is present but refuses to do anything, as in a locked-down browser. */
+export const UNREADABLE_STORAGE: StorageLike = {
+  getItem() {
+    throw new Error('SecurityError: storage is disabled');
+  },
+  setItem() {
+    throw new Error('SecurityError: storage is disabled');
+  },
+  removeItem() {
+    throw new Error('SecurityError: storage is disabled');
+  },
+  key() {
+    return null;
+  },
+  length: 0,
+};

@@ -10,7 +10,9 @@ import {
   rawAccuracy,
   recordAttempt,
   smoothedAccuracy,
+  sortUnitRows,
   tallySession,
+  unitRows,
   weakestUnits,
   wordsPerMinute,
 } from '../core/metrics';
@@ -268,5 +270,64 @@ describe('mergeMetricMaps', () => {
 
   it('is empty when both sides are empty', () => {
     expect(mergeMetricMaps({}, {})).toEqual({});
+  });
+});
+
+describe('unitRows and sortUnitRows', () => {
+  const map = {
+    a: metric(10, 9), // 1 error, 90%
+    b: metric(2, 0), // 2 errors, 0%
+    c: metric(4, 4), // 0 errors, 100%
+  };
+
+  it('derives accuracy, misses and samples for every unit, including perfect ones', () => {
+    const rows = unitRows(map);
+    expect(rows).toHaveLength(3);
+    const byUnit = new Map(rows.map((row) => [row.unit, row]));
+    expect(byUnit.get('a')).toMatchObject({ accuracy: 0.9, errors: 1, attempts: 10 });
+    expect(byUnit.get('b')).toMatchObject({ accuracy: 0, errors: 2, attempts: 2 });
+    expect(byUnit.get('c')).toMatchObject({ accuracy: 1, errors: 0, attempts: 4 });
+  });
+
+  it('treats a unit with no attempts as zero accuracy rather than dividing by zero', () => {
+    expect(unitRows({ z: metric(0, 0) })[0]?.accuracy).toBe(0);
+  });
+
+  it('sorts by misses, worst first by default', () => {
+    const units = sortUnitRows(unitRows(map), 'errors', 'desc').map((row) => row.unit);
+    expect(units).toEqual(['b', 'a', 'c']);
+  });
+
+  it('sorts by accuracy in both directions', () => {
+    expect(sortUnitRows(unitRows(map), 'accuracy', 'asc').map((row) => row.unit)).toEqual([
+      'b',
+      'a',
+      'c',
+    ]);
+    expect(sortUnitRows(unitRows(map), 'accuracy', 'desc').map((row) => row.unit)).toEqual([
+      'c',
+      'a',
+      'b',
+    ]);
+  });
+
+  it('sorts by sample size', () => {
+    expect(sortUnitRows(unitRows(map), 'samples', 'desc').map((row) => row.unit)).toEqual([
+      'a',
+      'c',
+      'b',
+    ]);
+  });
+
+  it('breaks ties by sample size and then by name, so the table never reshuffles', () => {
+    const tied = { z: metric(2, 1, { x: 1 }), y: metric(2, 1, { x: 1 }) };
+    expect(sortUnitRows(unitRows(tied), 'errors', 'desc').map((row) => row.unit)).toEqual(['y', 'z']);
+  });
+
+  it('does not mutate the rows it was given', () => {
+    const rows = unitRows(map);
+    const before = rows.map((row) => row.unit);
+    sortUnitRows(rows, 'accuracy', 'asc');
+    expect(rows.map((row) => row.unit)).toEqual(before);
   });
 });
