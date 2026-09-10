@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="yskeys">
+  <rect width="32" height="32" rx="7" fill="#1d4ed8" />
+  <rect x="9" y="8" width="4" height="16" rx="1.5" fill="#ffffff" opacity="0.95" />
+  <rect x="16" y="19" width="8" height="3" rx="1.5" fill="#ffffff" opacity="0.75" />
+  <rect x="16" y="11" width="4" height="3" rx="1.5" fill="#ffffff" opacity="0.5" />
+</svg>

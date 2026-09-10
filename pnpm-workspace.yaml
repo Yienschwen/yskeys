@@ -1,0 +1,5 @@
+# pnpm 12 refuses packages newer than its minimumReleaseAge (a supply-chain guard).
+# vite@8.3.0 is inside that window; pnpm wrote this exclusion during install and it
+# must stay committed or `pnpm install --frozen-lockfile` fails in CI.
+minimumReleaseAgeExclude:
+  - vite@8.3.0
