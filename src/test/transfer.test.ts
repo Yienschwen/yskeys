@@ -30,6 +30,7 @@ function storeWithSession(): Store {
     id: createSessionId(2000, 1),
     startedAt: 2000,
     mode: 'uniform',
+    shape: 'uniform',
     worstLimit: RESULT_WEAK_LIMIT,
   });
   return applySession(store, summary, tally, 3000);
@@ -140,6 +141,29 @@ describe('parseExportFile', () => {
     expect(file.aggregates.totalSessions).toBe(1);
     expect(file.settings.groupCount).toBe(30);
     expect(file.app.version).toBe(APP_VERSION);
+  });
+
+  it('carries an optional word list, and treats a malformed one as fatal', () => {
+    const store = storeWithSession();
+    const list = { name: 'eff_short_wordlist_1.txt', importedAt: 42, words: ['acid', 'acorn'] };
+
+    const withList = fileOf(
+      parseExportFile(serializeExport(buildExportFile(store, 4000, APP_VERSION, list))),
+    );
+    expect(withList.wordList).toEqual(list);
+
+    const withoutList = fileOf(
+      parseExportFile(serializeExport(buildExportFile(store, 4000, APP_VERSION))),
+    );
+    expect(withoutList.wordList).toBeUndefined();
+
+    const raw = JSON.parse(serializeExport(buildExportFile(store, 4000, APP_VERSION))) as Record<
+      string,
+      unknown
+    >;
+    expect(reasonOf(parseExportFile(JSON.stringify({ ...raw, wordList: { name: 7 } })))).toBe(
+      'wordList is malformed',
+    );
   });
 });
 

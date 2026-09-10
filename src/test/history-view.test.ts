@@ -29,6 +29,7 @@ function addSession(
     id: createSessionId(startedAt, 1),
     startedAt,
     mode: 'uniform',
+    shape: 'uniform',
     worstLimit: RESULT_WEAK_LIMIT,
   });
   return applySession(store, summary, tally, startedAt);
@@ -68,8 +69,16 @@ function render(store: Store, overrides: Partial<Parameters<typeof createHistory
     importFile: vi.fn(),
     clear: vi.fn(),
     undo: vi.fn(),
+    importWordList: vi.fn(),
+    removeWordList: vi.fn(),
   };
-  const element = createHistoryView({ store, actions, canUndo: false, ...overrides });
+  const element = createHistoryView({
+    store,
+    actions,
+    canUndo: false,
+    wordList: null,
+    ...overrides,
+  });
   document.body.append(element);
   return { element, actions };
 }
@@ -219,5 +228,29 @@ describe('history view', () => {
 
     expect(actions.importFile).toHaveBeenCalledTimes(1);
     expect(input.value).toBe('');
+  });
+
+  it('shows the imported word list and offers replacing or removing it', () => {
+    const { element, actions } = render(storeWithSessions(), {
+      wordList: {
+        name: 'eff_short_wordlist_1.txt',
+        importedAt: Date.UTC(2026, 0, 2),
+        wordCount: 1295,
+      },
+    });
+
+    expect(element.textContent).toContain('eff_short_wordlist_1.txt');
+    expect(element.textContent).toContain('1295');
+    expect(element.textContent).toContain('Replace word list');
+
+    buttonByText(element, 'Remove word list').click();
+    expect(actions.removeWordList).toHaveBeenCalledTimes(1);
+  });
+
+  it('invites an import when no word list is loaded', () => {
+    const { element } = render(storeWithSessions());
+
+    expect(element.textContent).toContain('No word list yet');
+    expect(element.textContent).toContain('Import word list');
   });
 });

@@ -18,6 +18,12 @@ import type { Aggregates, SessionSummary, Settings, Store } from './schema';
 
 export const EXPORT_KIND = 'yskeys-export';
 
+export interface ExportWordList {
+  name: string;
+  importedAt: number;
+  words: string[];
+}
+
 export interface ExportFile {
   kind: typeof EXPORT_KIND;
   schemaVersion: number;
@@ -26,6 +32,12 @@ export interface ExportFile {
   settings: Settings;
   aggregates: Aggregates;
   sessions: SessionSummary[];
+  /**
+   * Optional, so files written before the word list existed still validate. An export
+   * carries the list to keep a backup self-contained; an import that lacks it leaves
+   * whatever is already stored alone.
+   */
+  wordList?: ExportWordList;
 }
 
 export type ParseResult = { ok: true; file: ExportFile } | { ok: false; reason: string };
@@ -34,7 +46,12 @@ export type ImportResult =
   | { ok: true; store: Store; file: ExportFile; mode: ImportMode }
   | { ok: false; reason: string };
 
-export function buildExportFile(store: Store, now: number, appVersion: string): ExportFile {
+export function buildExportFile(
+  store: Store,
+  now: number,
+  appVersion: string,
+  wordList?: ExportWordList,
+): ExportFile {
   return {
     kind: EXPORT_KIND,
     schemaVersion: SCHEMA_VERSION,
@@ -43,6 +60,7 @@ export function buildExportFile(store: Store, now: number, appVersion: string): 
     settings: store.settings,
     aggregates: store.aggregates,
     sessions: store.sessions,
+    ...(wordList === undefined ? {} : { wordList }),
   };
 }
 
@@ -122,6 +140,10 @@ export function parseExportFile(
 
   const exportedAt = value['exportedAt'];
   const app = value['app'];
+  const wordList = value['wordList'];
+  if (wordList !== undefined && !isExportWordList(wordList)) {
+    return { ok: false, reason: 'wordList is malformed' };
+  }
   return {
     ok: true,
     file: {
@@ -135,8 +157,19 @@ export function parseExportFile(
       settings,
       aggregates,
       sessions,
+      ...(wordList === undefined ? {} : { wordList }),
     },
   };
+}
+
+function isExportWordList(value: unknown): value is ExportWordList {
+  return (
+    isRecord(value) &&
+    typeof value['name'] === 'string' &&
+    isFiniteNumber(value['importedAt']) &&
+    Array.isArray(value['words']) &&
+    value['words'].every((word) => typeof word === 'string')
+  );
 }
 
 /**

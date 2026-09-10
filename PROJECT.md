@@ -34,10 +34,11 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 
 ### F1 — Session generation
 - **Trigger**: page load with no active session, or "Again" after a result, or `Esc`.
-- **Normal**: build the whole session up front (default 30 groups × 5 chars ≈ 150 non-space
-  characters) from the
-  enabled charsets. Weights come from history (§5); with no history, use the cold-start prior.
-  Show the target string with the current position highlighted.
+- **Normal**: build the whole session up front (default ≈ 150 non-space characters) from the enabled
+  charsets, in one of two shapes: **words** drawn from the list the user imported, or **uniform
+  character groups**. Words are used when the shape setting asks for it, a list is imported, and every
+  enabled charset is a letter set; otherwise the character drill runs. Weights come from history; with
+  no history, use the cold-start prior. Show the target with the current position highlighted.
 - **Exceptions**: only one charset enabled → fine. Zero charsets enabled → block start and prompt
   to enable one. History exists but every unit has 0 attempts → fall back to cold-start prior.
 
@@ -64,7 +65,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 - **Trigger**: session end (and after import / clear).
 - **Normal**: merge the session delta into `Aggregates` — unigrams, bigrams, trigrams, and the
   per-finger, per-hand, per-Shift and per-character-kind counters — and write to `localStorage` under
-  one versioned key, together with the settings. Keep the last 200 session summaries.
+  one versioned key, together with the settings. The imported word list is stored under its own key,
+  so history pruning and "clear all data" can never touch it. Keep the last 200 session summaries.
 - **Exceptions**: `localStorage` unavailable or quota exceeded → app keeps working in memory, shows a
   persistent banner ("history is not being saved — export your data"), never throws. An unreadable
   payload is parked under a `yskeys:corrupt:` key instead of being overwritten. Payload over
@@ -102,7 +104,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 ### F8 — Export
 - **Trigger**: "Export" in History.
 - **Normal**: download `yskeys-export-YYYYMMDD-HHmm.json` (2-space indented) containing
-  `kind`, `schemaVersion`, `exportedAt`, `app.version`, `aggregates`, `sessions`.
+  `kind`, `schemaVersion`, `exportedAt`, `app.version`, `settings`, `aggregates`, `sessions`, and the
+  imported word list when there is one.
 - **Exceptions**: download blocked → offer a copy-to-clipboard textarea fallback.
 
 ### F9 — Import
@@ -110,7 +113,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 - **Normal**: Replace overwrites local data after snapshotting the current state to a one-step
   undo backup. Merge adds counters field-by-field, unions sessions by `id`, keeps the earlier
   `createdAt`. **Both modes adopt the settings from the file**, so the two modes differ only in how
-  the numbers combine and the file is the single source of truth for what is being practised.
+  the numbers combine and the file is the single source of truth for what is being practised. A file
+  that carries a word list replaces the local one; a file without one leaves the local list untouched.
 - **Exceptions**: malformed JSON / wrong `kind` → reject, keep current data, show the reason.
   `schemaVersion` newer than the app → refuse and ask the user to update the page. Older → run the
   migration chain. Merge with a file whose `schemaVersion` is older → migrate first, then merge.
@@ -118,15 +122,17 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 ### F10 — Settings
 - **Trigger**: charset / length / mode controls in the header.
 - **Normal**: charsets = lowercase (default on), uppercase, digits, punctuation, programming symbols.
-  Length 15 / 30 (default) / 60 groups. Mode `adaptive` (default) / `uniform`; the mode control
-  appears with M3, when both modes actually exist. Changes apply to the **next** session, never
-  mid-session.
+  Length 15 / 30 (default) / 60 groups. Shape `words` (default) / `characters`; the words option is
+  disabled with a stated reason when no usable list is loaded, when the list has too few usable words,
+  or when a non-letter charset is enabled. Mode `adaptive` (default) / `uniform`; that control arrives
+  with M3. Changes apply to the **next** session, never mid-session.
 - **Exceptions**: turning off all charsets is prevented at the UI level. Settings persist alongside
   history and are included in the export.
 
 ### F11 — Clear data
 - **Trigger**: "Clear all data" + typed confirmation.
-- **Normal**: delete the store and session list, reset to cold start.
+- **Normal**: delete the history store and settings, reset to cold start. The imported word list
+  survives on purpose: it is a file the user had to download, not history they can regenerate.
 - **Exceptions**: none — the confirmation is the guard. Undo is not offered here (export instead).
 
 ### F12 — Keyboard heatmap *(cuttable)*
@@ -140,7 +146,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 | Not doing | Why |
 | --- | --- |
 | Chinese / pinyin / IME input | Composition state breaks keystroke attribution; different metric entirely |
-| Word list or article/passage mode | MVP drills n-grams only; word mode is v1.1 |
+| Article / passage mode | Words are drilled, but only from a word list — no sentences or prose |
+| Bundling a word list in the repo | No third-party data ships here: you import a file you downloaded yourself, so no licence obligation attaches to the repository |
 | Pasting custom text to type | Same — v1.1 |
 | Accounts, cloud sync, leaderboards, sharing | No backend is an architectural premise |
 | Spaced repetition (SRS / Anki-style scheduling) | v2; MVP uses weighted sampling only |
@@ -178,6 +185,12 @@ The authoritative shapes live in `src/store/schema.ts`; this is only the summary
   key, recorded as a unigram, and attributed to `byFinger['thumb']` and `byKind['space']`. A drill of
   30 groups therefore has 179 characters, not 150. Space is deliberately **not** one of the five
   selectable charsets: it is never optional, it is the separator.
+- The **imported word list** lives under its own key (`yskeys:v1:words`), outside the history store:
+  the budget guard must never prune it and "clear all data" must never delete a file you had to
+  download. An export carries it; an import that has one replaces it, and one that does not leaves it
+  alone. Parsing is deliberately permissive (dice numbers, comments, CRLF, any printable ASCII) and
+  reports how many lines it skipped; usability is decided per session, because the enabled charsets can
+  change after the import. There is no bundled list.
 - Trigrams are all accumulated and persisted; ones below three attempts are only hidden from the UI.
   The earlier "persist only ≥ 3 attempts" rule was dropped because it reset sub-threshold counts on
   every write, so a trigram seen once per session could never accumulate.
@@ -196,8 +209,8 @@ yskeys/
    ├─ main.ts          # wiring: views, keyboard, session lifecycle
    ├─ config.ts        # all tunables (γ, α, boost, mix ratios, lengths, size guard)
    ├─ vite-env.d.ts    # Vite ambient types (asset imports)
-   ├─ core/            # pure, no DOM: charset, random, generator, engine, metrics, layout (+ adaptive)
-   ├─ store/           # schema (+validators), migrations, aggregate, persistence, transfer
+   ├─ core/            # pure, no DOM: charset, random, generator, wordlist, engine, metrics, layout (+ adaptive)
+   ├─ store/           # schema (+validators), migrations, aggregate, persistence, transfer, wordlist
    ├─ ui/              # dom, format, stat, banner, chart, dialogs, settings-controls,
    │                   # typing-view, result-view, history-view, styles.css
    └─ test/            # invariant tests for core/ and store/
@@ -219,7 +232,10 @@ Data flow: `charset + aggregates → adaptive.weights → generator.buildSession
 
 ## 7. Later
 
-**v1.1** — `lift`-weighted bigrams, trigram generation, word mode, paste-your-own text,
-pronounceable pseudo-word drills, goals/streaks.
+**v1.1** — `lift`-weighted bigrams, trigram generation, code-shaped tokens for the symbol and digit
+charsets (the current answer for those is still random groups), paste-your-own text, goals/streaks.
 **v2** — move to IndexedDB with a raw keystroke event log, SRS scheduling, multiple layouts,
-File System Access API auto-save to a local folder.
+File System Access API auto-save to a local folder, multiple named word lists.
+
+Rejected outright: generated pronounceable pseudo-words. A word list the user chooses is better
+practice material and needs no invented data.

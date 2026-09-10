@@ -18,12 +18,21 @@ export interface HistoryActions {
   readonly importFile: (file: File) => void;
   readonly clear: () => void;
   readonly undo: () => void;
+  readonly importWordList: (file: File) => void;
+  readonly removeWordList: () => void;
+}
+
+export interface WordListInfo {
+  readonly name: string;
+  readonly importedAt: number;
+  readonly wordCount: number;
 }
 
 export interface HistoryInput {
   readonly store: Store;
   readonly actions: HistoryActions;
   readonly canUndo: boolean;
+  readonly wordList: WordListInfo | null;
 }
 
 export function createHistoryView(input: HistoryInput): HTMLElement {
@@ -269,6 +278,21 @@ function createBreakdown(store: Store): HTMLElement {
 function createDataPanel(input: HistoryInput): HTMLElement {
   const panel = h('section', 'panel');
   panel.append(h('h3', 'panel__title', 'Your data'));
+  panel.append(createHistoryRow(input));
+  panel.append(createWordListRow(input));
+  panel.append(
+    h(
+      'p',
+      'view__lead',
+      'Export writes a JSON file you can reload anywhere. Nothing ever leaves this browser on its own.',
+    ),
+  );
+  return panel;
+}
+
+function createHistoryRow(input: HistoryInput): HTMLElement {
+  const row = h('div', 'data-row');
+  row.append(h('h4', 'data-row__title', 'History'));
 
   const actions = h('div', 'dialog__actions');
 
@@ -304,15 +328,56 @@ function createDataPanel(input: HistoryInput): HTMLElement {
   clear.addEventListener('click', input.actions.clear);
   actions.append(clear);
 
-  panel.append(actions);
-  panel.append(
+  row.append(actions);
+  return row;
+}
+
+function createWordListRow(input: HistoryInput): HTMLElement {
+  const row = h('div', 'data-row');
+  row.append(h('h4', 'data-row__title', 'Word list'));
+
+  const list = input.wordList;
+  row.append(
     h(
       'p',
       'view__lead',
-      'Export writes a JSON file you can reload anywhere. Nothing ever leaves this browser on its own.',
+      list === null
+        ? 'No word list yet. Real-word drills need one; the character drill works without.'
+        : `${list.name} — ${formatCount(list.wordCount)} words, imported ${formatDate(list.importedAt)}.`,
     ),
   );
-  return panel;
+
+  const actions = h('div', 'dialog__actions');
+  const fileInput = h('input', 'visually-hidden');
+  fileInput.type = 'file';
+  fileInput.accept = '.txt,.text,.json,text/plain';
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (file) {
+      input.actions.importWordList(file);
+    }
+    fileInput.value = '';
+  });
+  const importLabel = h('label', 'button');
+  importLabel.append(list === null ? 'Import word list' : 'Replace word list', fileInput);
+  actions.append(importLabel);
+
+  if (list !== null) {
+    const remove = h('button', 'button button--danger', 'Remove word list');
+    remove.type = 'button';
+    remove.addEventListener('click', input.actions.removeWordList);
+    actions.append(remove);
+  }
+
+  row.append(actions);
+  return row;
+}
+
+function formatDate(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return 'at an unknown time';
+  }
+  return `on ${new Date(timestamp).toISOString().slice(0, 10)}`;
 }
 
 function sumCorrect(store: Store): number {

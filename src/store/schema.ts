@@ -1,17 +1,23 @@
 import { DEFAULT_GROUP_COUNT, SCHEMA_VERSION } from '../config';
 import { CHARSETS, defaultCharsetIds } from '../core/charset';
 import type { CharsetId } from '../core/charset';
+import type { DrillShape } from '../core/generator';
 import type { Metric } from '../core/metrics';
 
 /**
- * The persisted shapes (PROJECT.md §5.1) plus the validators that decide whether an
- * imported file may be trusted. Validation lives next to the shape so the two cannot
- * drift apart.
+ * The persisted shapes plus the validators that decide whether an imported file may be
+ * trusted. Validation lives next to the shape so the two cannot drift apart.
  */
 
 export interface Settings {
   charsets: CharsetId[];
   groupCount: number;
+  /** Optional: exports written before the word list existed must still validate. */
+  shape?: DrillShape;
+}
+
+export function preferredShape(settings: Settings): DrillShape {
+  return settings.shape ?? 'words';
 }
 
 /** Metric keys that every aggregate map must have. */
@@ -54,6 +60,8 @@ export interface SessionSummary {
   startedAt: number;
   durationMs: number;
   mode: 'adaptive' | 'uniform';
+  /** Which drill shape produced this session; CPM is not comparable across shapes. */
+  shape?: DrillShape;
   charsets: CharsetId[];
   totalChars: number;
   attempts: number;
@@ -73,7 +81,7 @@ export interface Store {
 }
 
 export function defaultSettings(): Settings {
-  return { charsets: [...defaultCharsetIds()], groupCount: DEFAULT_GROUP_COUNT };
+  return { charsets: [...defaultCharsetIds()], groupCount: DEFAULT_GROUP_COUNT, shape: 'words' };
 }
 
 export function emptyAggregates(now: number): Aggregates {
@@ -158,7 +166,11 @@ export function isSettings(value: unknown): value is Settings {
     return false;
   }
   const groupCount = value['groupCount'];
-  return isFiniteNumber(groupCount) && groupCount > 0;
+  if (!isFiniteNumber(groupCount) || groupCount <= 0) {
+    return false;
+  }
+  const shape = value['shape'];
+  return shape === undefined || shape === 'words' || shape === 'uniform';
 }
 
 export function isWorstUnit(value: unknown): value is WorstUnit {
@@ -206,7 +218,11 @@ export function isSessionSummary(value: unknown): value is SessionSummary {
     }
   }
   const worstUnits = value['worstUnits'];
-  return Array.isArray(worstUnits) && worstUnits.every(isWorstUnit);
+  if (!Array.isArray(worstUnits) || !worstUnits.every(isWorstUnit)) {
+    return false;
+  }
+  const shape = value['shape'];
+  return shape === undefined || shape === 'words' || shape === 'uniform';
 }
 
 export function isAggregates(value: unknown): value is Aggregates {

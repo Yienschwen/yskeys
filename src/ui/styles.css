@@ -695,6 +695,65 @@ ul {
   font-size: var(--text-xs);
 }
 
+.settings__hint {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+/* Two-option drill shape control (words vs random characters). */
+.segmented {
+  display: inline-flex;
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segment {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 0;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.segment + .segment {
+  border-left: var(--border-w) solid var(--border);
+}
+
+.segment:hover {
+  background: var(--surface-2);
+}
+
+.segment.is-on {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.segment:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.segment:disabled:hover {
+  background: var(--surface);
+}
+
+/* One row per concern inside the "Your data" panel. */
+.data-row + .data-row {
+  padding-block-start: var(--space-4);
+  border-top: var(--border-w) solid var(--border);
+}
+
+.data-row__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
 .select,
 .input,
 .textarea {

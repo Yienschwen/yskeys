@@ -1,25 +1,39 @@
 import { SESSION_GROUP_COUNTS } from '../config';
 import { CHARSETS } from '../core/charset';
 import type { CharsetId } from '../core/charset';
+import type { DrillShape } from '../core/generator';
+import { preferredShape } from '../store/schema';
 import type { Settings } from '../store/schema';
 import { h } from './dom';
 
 /**
  * The settings row (PROJECT.md F10). Changes apply to the next drill, never to a
- * session already in flight, and turning off the last character set is prevented at
- * the UI level rather than being rejected somewhere downstream.
+ * session already in flight, and turning off the last character set is prevented here
+ * rather than being rejected somewhere downstream.
+ *
+ * The shape control only appears meaningful once a word list exists, so its "Words"
+ * option is disabled with a reason when it cannot be honoured.
  */
 
 export interface SettingsControls {
   readonly element: HTMLElement;
   update(settings: Settings): void;
+  setWordsState(available: boolean, hint: string): void;
 }
+
+const SHAPES: ReadonlyArray<readonly [DrillShape, string]> = [
+  ['words', 'Words'],
+  ['uniform', 'Characters'],
+];
 
 export function createSettingsControls(
   initial: Settings,
   onChange: (next: Settings) => void,
+  options: { wordsAvailable: boolean; wordsHint: string },
 ): SettingsControls {
-  let current: Settings = { charsets: [...initial.charsets], groupCount: initial.groupCount };
+  let current: Settings = { ...initial, charsets: [...initial.charsets] };
+  let wordsAvailable = options.wordsAvailable;
+  let wordsHint = options.wordsHint;
 
   const sets = h('div', 'control-row');
   sets.setAttribute('role', 'group');
@@ -30,10 +44,27 @@ export function createSettingsControls(
     const pill = h('button', 'pill', charset.label);
     pill.type = 'button';
     pill.addEventListener('click', () => {
-      toggle(charset.id);
+      toggleCharset(charset.id);
     });
     pills.set(charset.id, pill);
     sets.append(pill);
+  }
+
+  const shapeGroup = h('div', 'segmented');
+  shapeGroup.setAttribute('role', 'group');
+  shapeGroup.setAttribute('aria-label', 'Drill shape');
+  const shapeButtons = new Map<DrillShape, HTMLButtonElement>();
+  for (const [shape, label] of SHAPES) {
+    const button = h('button', 'segment', label);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      if (shape === 'words' && !wordsAvailable) {
+        return;
+      }
+      emit({ ...current, shape });
+    });
+    shapeButtons.set(shape, button);
+    shapeGroup.append(button);
   }
 
   const lengthLabel = h('label', 'field');
@@ -47,15 +78,17 @@ export function createSettingsControls(
   lengthSelect.addEventListener('change', () => {
     const parsed = Number.parseInt(lengthSelect.value, 10);
     if (Number.isFinite(parsed)) {
-      emit({ charsets: current.charsets, groupCount: parsed });
+      emit({ ...current, groupCount: parsed });
     }
   });
   lengthLabel.append(lengthSelect);
 
-  const element = h('div', 'settings');
-  element.append(sets, lengthLabel);
+  const shapeHint = h('span', 'settings__hint');
 
-  function toggle(id: CharsetId): void {
+  const element = h('div', 'settings');
+  element.append(sets, shapeGroup, lengthLabel, shapeHint);
+
+  function toggleCharset(id: CharsetId): void {
     const enabled = current.charsets;
     const isOn = enabled.includes(id);
     if (isOn && enabled.length === 1) {
@@ -63,34 +96,58 @@ export function createSettingsControls(
       return;
     }
     const next = isOn ? enabled.filter((entry) => entry !== id) : [...enabled, id];
-    emit({ charsets: next, groupCount: current.groupCount });
+    emit({ ...current, charsets: next });
   }
 
   function emit(next: Settings): void {
-    current = next;
     update(next);
     onChange(next);
   }
 
   function update(settings: Settings): void {
-    current = { charsets: [...settings.charsets], groupCount: settings.groupCount };
+    current = { ...settings, charsets: [...settings.charsets] };
     const onlyOneLeft = current.charsets.length === 1;
 
     for (const [id, pill] of pills) {
       const on = current.charsets.includes(id);
       pill.setAttribute('aria-pressed', String(on));
       pill.className = on ? 'pill is-on' : 'pill';
-      // The final active set cannot be switched off, so say so instead of ignoring
-      // the click silently.
       pill.disabled = on && onlyOneLeft;
       pill.title = pill.disabled
         ? 'At least one character set has to stay on'
         : `Toggle ${id} for the next drill`;
     }
+
+    const shape = preferredShape(current);
+    for (const [key, button] of shapeButtons) {
+      const on = key === shape;
+      button.setAttribute('aria-pressed', String(on));
+      button.className = on ? 'segment is-on' : 'segment';
+    }
+    applyWordsState();
+
     lengthSelect.value = String(current.groupCount);
+  }
+
+  function applyWordsState(): void {
+    const words = shapeButtons.get('words');
+    if (words) {
+      words.disabled = !wordsAvailable;
+      words.title = wordsAvailable
+        ? 'Practise real words from the list you imported'
+        : wordsHint;
+    }
+    shapeHint.textContent = wordsAvailable ? '' : wordsHint;
+    shapeHint.hidden = wordsAvailable;
+  }
+
+  function setWordsState(available: boolean, hint: string): void {
+    wordsAvailable = available;
+    wordsHint = hint;
+    applyWordsState();
   }
 
   update(initial);
 
-  return { element, update };
+  return { element, update, setWordsState };
 }

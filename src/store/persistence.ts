@@ -219,7 +219,7 @@ function park(storage: StorageLike, raw: string, now: number): string | null {
   }
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   if (isRecord(error) && typeof error['name'] === 'string' && typeof error['message'] === 'string') {
     return `${error['name']}: ${error['message']}`;
   }

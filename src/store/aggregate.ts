@@ -1,5 +1,6 @@
 import { MAX_SESSION_SUMMARIES, SCHEMA_VERSION } from '../config';
 import type { SessionState } from '../core/engine';
+import type { DrillShape } from '../core/generator';
 import {
   charsPerMinute,
   median,
@@ -56,6 +57,7 @@ export interface SessionSummaryInput {
   readonly id: string;
   readonly startedAt: number;
   readonly mode: 'adaptive' | 'uniform';
+  readonly shape: DrillShape;
   readonly worstLimit: number;
 }
 
@@ -74,6 +76,7 @@ export function buildSessionSummary(input: SessionSummaryInput): SessionSummary 
     startedAt: input.startedAt,
     durationMs: state.activeMs,
     mode: input.mode,
+    shape: input.shape,
     charsets: [...input.settings.charsets],
     totalChars: state.target.length,
     attempts: tally.totals.attempts,

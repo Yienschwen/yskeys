@@ -45,6 +45,27 @@ export const RESULT_WEAK_LIMIT = 5;
 /** Sessions plotted in the CPM trend. */
 export const CHART_MAX_POINTS = 60;
 
+/* ------------------------------------------------------------- word list -- */
+
+/**
+ * Its own storage key on purpose: history pruning and "clear all data" must never
+ * remove a list the user had to go and download.
+ */
+export const WORDLIST_KEY = 'yskeys:v1:words';
+
+/** A 10k frequency list is ~100 KB; a 479k dictionary is ~4.5 MB and would not fit. */
+export const MAX_WORDLIST_CHARS = 1_000_000;
+
+/** Words outside this range make poor typing practice. Two-letter words are kept: "of", "to" and "in" are among the most frequent English words. */
+export const WORD_MIN_LENGTH = 2;
+export const WORD_MAX_LENGTH = 16;
+
+/** Below this many usable words, repeats dominate and the character drill is better. */
+export const MIN_USABLE_WORDS = 25;
+
+/** How often a word is title-cased when the uppercase charset is enabled. */
+export const CAPITALIZE_PROBABILITY = 0.35;
+
 /* ---------------------------------------------------------------- session -- */
 
 export const GROUP_SIZE = 5;

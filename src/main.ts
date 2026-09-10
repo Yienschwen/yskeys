@@ -1,9 +1,16 @@
 import './ui/styles.css';
-import { APP_VERSION, GROUP_SIZE, MAX_IMPORT_CHARS, RESULT_WEAK_LIMIT } from './config';
+import {
+  APP_VERSION,
+  GROUP_SIZE,
+  MAX_IMPORT_CHARS,
+  MAX_WORDLIST_CHARS,
+  MIN_USABLE_WORDS,
+  RESULT_WEAK_LIMIT,
+} from './config';
 import { applyEvent, createSession, cursorIndex, isFinished } from './core/engine';
 import type { Judgement, SessionEvent, SessionState } from './core/engine';
-import { buildUniformDrill } from './core/generator';
-import type { Drill } from './core/generator';
+import { buildUniformDrill, buildWordDrill, isWordListUsable, usableWords } from './core/generator';
+import type { Drill, DrillShape } from './core/generator';
 import {
   charsPerMinute,
   median,
@@ -12,6 +19,7 @@ import {
   weakestUnits,
   wordsPerMinute,
 } from './core/metrics';
+import { parseWordList } from './core/wordlist';
 import { applySession, buildSessionSummary } from './store/aggregate';
 import {
   backupStore,
@@ -22,15 +30,18 @@ import {
   storageAvailable,
 } from './store/persistence';
 import type { StorageLike } from './store/persistence';
-import { createSessionId, defaultStore } from './store/schema';
+import { createSessionId, defaultStore, preferredShape } from './store/schema';
 import type { Settings, Store } from './store/schema';
 import { buildExportFile, importFromText, parseExportFile, serializeExport } from './store/transfer';
 import type { ImportMode } from './store/transfer';
+import { loadWordList, removeWordList as removeStoredWordList, saveWordList } from './store/wordlist';
+import type { StoredWordList } from './store/wordlist';
 import { createBannerHost } from './ui/banner';
 import { askImportMode, confirmClear, showExportFallback } from './ui/dialogs';
 import { h } from './ui/dom';
 import { formatCount, formatDuration, formatPercent, formatSpeed } from './ui/format';
 import { createHistoryView } from './ui/history-view';
+import type { WordListInfo } from './ui/history-view';
 import { createResultView } from './ui/result-view';
 import { createSettingsControls } from './ui/settings-controls';
 import { createStatRow } from './ui/stat';
@@ -39,9 +50,9 @@ import type { TypingView } from './ui/typing-view';
 
 /**
  * Wiring: app shell, keyboard translation, pause handling, view switching, and the
- * handoff between the store and the views. All typing, statistics and persistence
- * logic lives in src/core and src/store and is unit tested; this file only connects
- * browser events to it.
+ * handoff between the store and the views. All typing, statistics, persistence and
+ * word-list logic lives in src/core and src/store and is unit tested; this file only
+ * connects browser events to it.
  */
 
 export interface AppOptions {
@@ -66,6 +77,9 @@ export interface AppHandle {
   importText(text: string, mode: ImportMode): { ok: boolean; reason?: string };
   undoReplace(): boolean;
   clearAll(): void;
+  wordList(): StoredWordList | null;
+  importWordListText(text: string, name: string): { ok: boolean; reason?: string };
+  removeWordList(): void;
 }
 
 type Mode = 'practice' | 'result' | 'history';
@@ -79,16 +93,22 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
 
   // Replaced by loadInitialStore() before the first session starts.
   let store: Store = defaultStore(now());
+  let wordList: StoredWordList | null = null;
   let session: SessionState | null = null;
   let view: TypingView | null = null;
   let mode: Mode = 'practice';
+  let activeShape: DrillShape = 'uniform';
   let lastJudgement: Judgement | null = null;
   let sessionCount = 0;
   let sessionWallStart = now();
   let backupKey: string | null = null;
   let warnedAboutStorage = false;
 
-  const settingsControls = createSettingsControls(store.settings, changeSettings);
+  const initialWords = wordsState();
+  const settingsControls = createSettingsControls(store.settings, changeSettings, {
+    wordsAvailable: initialWords.available,
+    wordsHint: initialWords.hint,
+  });
   const navButton = h('button', 'button', 'History');
   navButton.type = 'button';
   navButton.addEventListener('click', () => {
@@ -206,19 +226,76 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
     header.progress.style.width = `${(Math.min(1, cursorIndex(state) / state.target.length) * 100).toFixed(2)}%`;
   }
 
+  /* -------------------------------------------------------------- drills -- */
+
+  /**
+   * Whether the words shape can be honoured right now. Three separate reasons, and the
+   * user gets the actual one instead of a disabled control with no explanation.
+   */
+  function wordsState(): { available: boolean; hint: string } {
+    if (wordList === null) {
+      return { available: false, hint: 'Import a word list in History to practise real words' };
+    }
+    const lettersOnly = store.settings.charsets.every(
+      (id) => id === 'lowercase' || id === 'uppercase',
+    );
+    if (!lettersOnly) {
+      return { available: false, hint: 'Real words need letter-only character sets' };
+    }
+    if (!isWordListUsable(wordList.words, store.settings.charsets)) {
+      const usable = usableWords(wordList.words, store.settings.charsets).length;
+      return {
+        available: false,
+        hint:
+          usable === 0
+            ? 'No words in your list match the enabled character sets'
+            : `Only ${formatCount(usable)} usable words — at least ${formatCount(MIN_USABLE_WORDS)} are needed`,
+      };
+    }
+    return { available: true, hint: '' };
+  }
+
+  function refreshWordsState(): void {
+    const state = wordsState();
+    settingsControls.setWordsState(state.available, state.hint);
+  }
+
+  function buildDrillFor(seed: number): { drill: Drill; shape: DrillShape } {
+    if (preferredShape(store.settings) === 'words') {
+      const state = wordsState();
+      const list = wordList;
+      if (state.available && list !== null) {
+        return {
+          drill: buildWordDrill({
+            charsets: store.settings.charsets,
+            targetChars: store.settings.groupCount * GROUP_SIZE,
+            words: list.words,
+            seed,
+          }),
+          shape: 'words',
+        };
+      }
+    }
+    return {
+      drill: buildUniformDrill({
+        charsets: store.settings.charsets,
+        groupCount: store.settings.groupCount,
+        groupSize: GROUP_SIZE,
+        seed,
+      }),
+      shape: 'uniform',
+    };
+  }
+
   function startSession(): void {
     sessionCount += 1;
-    const drill: Drill = buildUniformDrill({
-      charsets: store.settings.charsets,
-      groupCount: store.settings.groupCount,
-      groupSize: GROUP_SIZE,
-      seed: nextSeed(),
-    });
-    session = createSession({ target: drill.text, groupSize: GROUP_SIZE });
+    const built = buildDrillFor(nextSeed());
+    activeShape = built.shape;
+    session = createSession({ target: built.drill.text, groupSize: GROUP_SIZE });
     sessionWallStart = now();
     lastJudgement = null;
     mode = 'practice';
-    view = createTypingView(drill);
+    view = createTypingView(built.drill);
     main.replaceChildren(practiceSection(view.element));
     view.render(currentSession(), null);
     refresh(currentSession());
@@ -249,6 +326,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
         id: createSessionId(sessionWallStart, sessionCount),
         startedAt: sessionWallStart,
         mode: 'uniform',
+        shape: activeShape,
         worstLimit: RESULT_WEAK_LIMIT,
       }),
       tally,
@@ -321,6 +399,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
     return createHistoryView({
       store,
       canUndo: backupKey !== null && storage !== null,
+      wordList: wordListInfo(),
       actions: {
         export: exportHistory,
         importFile: (file) => {
@@ -330,6 +409,10 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
           void clearConfirmed();
         },
         undo: undoReplace,
+        importWordList: (file) => {
+          void importWordListFile(file);
+        },
+        removeWordList,
       },
     });
   }
@@ -346,7 +429,11 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
   }
 
   function exportText(): string {
-    return serializeExport(buildExportFile(store, now(), APP_VERSION));
+    const list =
+      wordList === null
+        ? undefined
+        : { name: wordList.name, importedAt: wordList.importedAt, words: [...wordList.words] };
+    return serializeExport(buildExportFile(store, now(), APP_VERSION, list));
   }
 
   function exportHistory(): void {
@@ -404,6 +491,23 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
 
     store = result.store;
     settingsControls.update(store.settings);
+
+    // A file that carries a word list replaces the local one; one that does not leaves
+    // whatever is already imported alone.
+    const incoming = result.file.wordList;
+    if (incoming !== undefined) {
+      const entry: StoredWordList = {
+        name: incoming.name,
+        importedAt: incoming.importedAt,
+        words: [...incoming.words],
+      };
+      if (storage) {
+        saveWordList(storage, entry);
+      }
+      wordList = entry;
+    }
+
+    refreshWordsState();
     persist();
     if (mode === 'history') {
       main.replaceChildren(renderHistory());
@@ -414,9 +518,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
       message:
         `${importMode === 'replace' ? 'Replaced' : 'Merged'} with a file holding ` +
         `${formatCount(result.file.aggregates.totalSessions)} sessions. The file's settings are now yours.`,
-      ...(backupKey === null
-        ? {}
-        : { action: { label: 'Undo', onClick: undoReplace } }),
+      ...(backupKey === null ? {} : { action: { label: 'Undo', onClick: undoReplace } }),
     });
     return { ok: true };
   }
@@ -433,6 +535,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
     store = restored;
     backupKey = null;
     settingsControls.update(store.settings);
+    refreshWordsState();
     persist();
     if (mode === 'history') {
       main.replaceChildren(renderHistory());
@@ -450,24 +553,126 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
 
   function clearAll(): void {
     if (storage) {
+      // Deliberately does not touch the word list: that is a file the user had to go
+      // and download, not history they can regenerate.
       clearStore(storage);
     }
     backupKey = null;
     store = defaultStore(now());
     settingsControls.update(store.settings);
+    refreshWordsState();
     if (mode === 'history') {
       main.replaceChildren(renderHistory());
     }
-    banner.show({ kind: 'info', message: 'All history and settings were cleared.' });
+    banner.show({
+      kind: 'info',
+      message: 'All history and settings were cleared. Your word list was kept.',
+    });
   }
 
   function changeSettings(next: Settings): void {
     store = {
       ...store,
-      settings: { charsets: [...next.charsets], groupCount: next.groupCount },
+      settings: { charsets: [...next.charsets], groupCount: next.groupCount, ...(next.shape === undefined ? {} : { shape: next.shape }) },
     };
     settingsControls.update(store.settings);
+    refreshWordsState();
     persist();
+  }
+
+  /* ----------------------------------------------------------- word list -- */
+
+  function wordListInfo(): WordListInfo | null {
+    return wordList === null
+      ? null
+      : {
+          name: wordList.name,
+          importedAt: wordList.importedAt,
+          wordCount: wordList.words.length,
+        };
+  }
+
+  async function importWordListFile(file: File): Promise<void> {
+    if (file.size > MAX_WORDLIST_CHARS) {
+      banner.show({
+        kind: 'error',
+        message:
+          `That file is too large (${formatCount(file.size)} bytes; the limit is ` +
+          `${formatCount(MAX_WORDLIST_CHARS)}). A 10k frequency list is about 100 KB.`,
+      });
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch (error) {
+      banner.show({
+        kind: 'error',
+        message: `Could not read ${file.name}: ${describeError(error)}`,
+      });
+      return;
+    }
+    importWordListText(text, file.name);
+  }
+
+  function importWordListText(text: string, name: string): { ok: boolean; reason?: string } {
+    const parsed = parseWordList(text);
+    if (!parsed.ok) {
+      banner.show({ kind: 'error', message: `Word list rejected: ${parsed.reason}` });
+      return { ok: false, reason: parsed.reason };
+    }
+
+    const entry: StoredWordList = { name, importedAt: now(), words: parsed.list.words };
+    if (storage) {
+      const saved = saveWordList(storage, entry);
+      if (!saved.ok) {
+        banner.show({
+          kind: 'error',
+          message: `The word list could not be saved (${saved.reason ?? 'unknown error'}).`,
+        });
+        return { ok: false, ...(saved.reason === undefined ? {} : { reason: saved.reason }) };
+      }
+    }
+
+    wordList = entry;
+    refreshWordsState();
+    if (mode === 'history') {
+      main.replaceChildren(renderHistory());
+    }
+
+    const notes: string[] = [];
+    if (parsed.list.skipped > 0) {
+      notes.push(`${formatCount(parsed.list.skipped)} unusable lines skipped`);
+    }
+    if (parsed.list.duplicates > 0) {
+      notes.push(`${formatCount(parsed.list.duplicates)} duplicates ignored`);
+    }
+    // How many of the kept words the current charsets can actually type: the parser is
+    // deliberately permissive, so this is the number that matters to the user.
+    const usable = usableWords(parsed.list.words, store.settings.charsets).length;
+    banner.show({
+      kind: 'info',
+      message:
+        `Imported ${formatCount(parsed.list.kept)} words from ${name}; ` +
+        `${formatCount(usable)} usable with the current character sets` +
+        (notes.length === 0 ? '.' : ` (${notes.join(', ')}).`),
+    });
+    return { ok: true };
+  }
+
+  function removeWordList(): void {
+    if (storage) {
+      removeStoredWordList(storage);
+    }
+    wordList = null;
+    refreshWordsState();
+    if (mode === 'history') {
+      main.replaceChildren(renderHistory());
+    }
+    banner.show({
+      kind: 'info',
+      message: 'Word list removed. Drills fall back to random characters.',
+    });
   }
 
   /* ------------------------------------------------------------- keyboard -- */
@@ -531,7 +736,9 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
   }
 
   store = loadInitialStore();
+  wordList = storage === null ? null : loadWordList(storage);
   settingsControls.update(store.settings);
+  refreshWordsState();
   startSession();
 
   window.addEventListener('keydown', onKeyDown);
@@ -550,6 +757,9 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
     importText,
     undoReplace,
     clearAll,
+    wordList: () => wordList,
+    importWordListText,
+    removeWordList,
   };
 }
 

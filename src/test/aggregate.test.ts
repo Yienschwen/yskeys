@@ -16,6 +16,7 @@ function sessionFor(target: string, keys: readonly string[], startedAt = 1000, s
     id: createSessionId(startedAt, 1),
     startedAt,
     mode: 'uniform',
+    shape: 'uniform',
     worstLimit: RESULT_WEAK_LIMIT,
   });
   return { state, tally, summary };
@@ -86,6 +87,7 @@ describe('buildSessionSummary', () => {
       id: 's-test-1',
       startedAt: 1000,
       mode: 'uniform',
+      shape: 'uniform',
       worstLimit: RESULT_WEAK_LIMIT,
     });
 
@@ -110,6 +112,7 @@ describe('buildSessionSummary', () => {
       id: 's-test-2',
       startedAt: 1000,
       mode: 'uniform',
+      shape: 'uniform',
       worstLimit: RESULT_WEAK_LIMIT,
     });
     expect(summary.cpm).toBeNull();

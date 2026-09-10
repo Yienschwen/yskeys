@@ -97,6 +97,13 @@ describe('isSettings', () => {
     expect(isSettings(null)).toBe(false);
     expect(isSettings({})).toBe(false);
   });
+
+  it('accepts a missing drill shape but not an unknown one', () => {
+    expect(isSettings({ charsets: ['lowercase'], groupCount: 30 })).toBe(true);
+    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'words' })).toBe(true);
+    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform' })).toBe(true);
+    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'poetry' })).toBe(false);
+  });
 });
 
 describe('isWorstUnit', () => {
@@ -145,6 +152,12 @@ describe('isSessionSummary', () => {
     expect(isSessionSummary({ ...sample, worstUnits: [{}] })).toBe(false);
     expect(isSessionSummary({ ...sample, worstUnits: 'none' })).toBe(false);
     expect(isSessionSummary({ ...sample, startedAt: Number.NaN })).toBe(false);
+  });
+
+  it('accepts a missing drill shape but not an unknown one', () => {
+    expect(isSessionSummary({ ...sample, shape: 'words' })).toBe(true);
+    expect(isSessionSummary({ ...sample, shape: 'uniform' })).toBe(true);
+    expect(isSessionSummary({ ...sample, shape: 'poetry' })).toBe(false);
   });
 });
 

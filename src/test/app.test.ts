@@ -333,7 +333,11 @@ describe('persistence, settings and history', () => {
     app?.changeSettings({ charsets: ['symbols'], groupCount: 15 });
     app?.importText(text, 'replace');
     // The file carries the settings it was exported with.
-    expect(app?.store().settings).toEqual({ charsets: ['lowercase'], groupCount: 30 });
+    expect(app?.store().settings).toEqual({
+      charsets: ['lowercase'],
+      groupCount: 30,
+      shape: 'words',
+    });
 
     expect(app?.undoReplace()).toBe(true);
     expect(app?.store().settings).toEqual({ charsets: ['symbols'], groupCount: 15 });
@@ -400,6 +404,144 @@ describe('persistence, settings and history', () => {
     app?.clearAll();
 
     expect(app?.store().aggregates.totalSessions).toBe(0);
-    expect(app?.store().settings).toEqual({ charsets: ['lowercase'], groupCount: 30 });
+    expect(app?.store().settings).toEqual({
+      charsets: ['lowercase'],
+      groupCount: 30,
+      shape: 'words',
+    });
+  });
+});
+
+/** 26 distinct three-letter words: enough for the words shape to be offered. */
+const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+const LIST_WORDS = Array.from(
+  { length: 30 },
+  (_, index) =>
+    `${LETTERS[index % 26] ?? 'a'}${LETTERS[(index * 3 + 1) % 26] ?? 'a'}${LETTERS[(index * 7 + 2) % 26] ?? 'a'}`,
+);
+const LIST_TEXT = LIST_WORDS.join('\n');
+
+describe('word list and drill shape', () => {
+  it('drills real words once a list is imported', () => {
+    const { root } = mountWithStorage();
+    const imported = app?.importWordListText(LIST_TEXT, 'test.txt');
+    expect(imported?.ok).toBe(true);
+
+    app?.newSession();
+    const words = targetOf(root).split(' ');
+
+    expect(words.length).toBeGreaterThan(5);
+    expect(words.every((word) => LIST_WORDS.includes(word))).toBe(true);
+  });
+
+  it('reports what the parser kept, skipped and can use', () => {
+    const { root } = mountWithStorage();
+    app?.importWordListText('acid\nacorn\nab\nnaïve\n', 'mixed.txt');
+
+    const message = root.querySelector('.banner')?.textContent ?? '';
+    expect(message).toMatch(/Imported 3 words from mixed\.txt/);
+    expect(message).toMatch(/1 unusable lines skipped/);
+  });
+
+  it('stores the list without needing it for the current drill', () => {
+    const { storage } = mountWithStorage();
+    app?.importWordListText(LIST_TEXT, 'test.txt');
+
+    expect(app?.wordList()?.name).toBe('test.txt');
+    // The generated list has 30 entries but only 26 distinct words, and the parser dedupes.
+    expect(app?.wordList()?.words).toHaveLength(new Set(LIST_WORDS).size);
+
+    // A fresh page load finds it again.
+    app?.destroy();
+    app = null;
+    document.body.innerHTML = '<div id="app"></div>';
+    const reopened = document.getElementById('app');
+    if (!reopened) {
+      throw new Error('test setup failed: #app missing');
+    }
+    app = bootstrap(reopened, { seed: 5, storage });
+    expect(app.wordList()?.name).toBe('test.txt');
+  });
+
+  it('falls back to characters when a non-letter charset is enabled', () => {
+    const { root } = mountWithStorage();
+    app?.importWordListText(LIST_TEXT, 'test.txt');
+    app?.changeSettings({ charsets: ['lowercase', 'digits'], groupCount: 30, shape: 'words' });
+    app?.newSession();
+
+    const drill = targetOf(root);
+    expect(drill).toHaveLength(179);
+    // 150 random characters from 36 symbols with no digit at all is not a thing.
+    expect(drill).toMatch(/[0-9]/);
+  });
+
+  it('goes back to random characters when the shape is set to uniform', () => {
+    const { root } = mountWithStorage();
+    app?.importWordListText(LIST_TEXT, 'test.txt');
+    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform' });
+    app?.newSession();
+
+    const drill = targetOf(root);
+    expect(drill).toHaveLength(179);
+    expect(LIST_WORDS.includes(drill.split(' ')[0] ?? '')).toBe(false);
+  });
+
+  it('falls back to characters after the list is removed', () => {
+    const { root } = mountWithStorage();
+    app?.importWordListText(LIST_TEXT, 'test.txt');
+    app?.removeWordList();
+
+    expect(app?.wordList()).toBeNull();
+    app?.newSession();
+    expect(targetOf(root)).toHaveLength(179);
+  });
+
+  it('keeps the word list when history and settings are cleared', () => {
+    mountWithStorage();
+    app?.importWordListText(LIST_TEXT, 'test.txt');
+
+    app?.clearAll();
+
+    expect(app?.store().aggregates.totalSessions).toBe(0);
+    expect(app?.wordList()?.name).toBe('test.txt');
+  });
+
+  it('carries the word list in an export and restores it on import', () => {
+    const { storage } = mountWithStorage();
+    finishDrill(document.getElementById('app') as HTMLElement);
+    app?.importWordListText(LIST_TEXT, 'test.txt');
+    const text = app?.exportText() ?? '';
+
+    app?.removeWordList();
+    expect(app?.wordList()).toBeNull();
+    app?.clearAll();
+
+    expect(app?.importText(text, 'replace').ok).toBe(true);
+    expect(app?.wordList()?.name).toBe('test.txt');
+
+    // A file without a list leaves the imported one alone.
+    const withoutList = JSON.stringify(
+      (() => {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        delete parsed['wordList'];
+        return parsed;
+      })(),
+    );
+    app?.importText(withoutList, 'merge');
+    expect(app?.wordList()?.name).toBe('test.txt');
+    void storage;
+  });
+
+  it('records the shape that actually produced the session', () => {
+    const { root } = mountWithStorage();
+    app?.importWordListText(LIST_TEXT, 'test.txt');
+    app?.newSession();
+    finishDrill(root);
+    expect(app?.store().sessions[0]?.shape).toBe('words');
+
+    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform' });
+    app?.newSession();
+    finishDrill(root);
+    expect(app?.store().sessions[0]?.shape).toBe('uniform');
   });
 });

@@ -55,6 +55,35 @@ Then:
 The base path `/yskeys/` is set in `vite.config.ts` and **must match the repository name**,
 otherwise every built asset 404s on the Pages subpath.
 
+## Word list
+
+Real-word drills need a list, and **none is bundled**: download one and import it via
+**History → Word list → Import**. Nothing is ever fetched over the network.
+
+Recommended sources, with figures measured from the actual files:
+
+| List | Size | Word length | Licence | Notes |
+| --- | --- | --- | --- | --- |
+| [EFF short wordlist](https://www.eff.org/files/2016/09/08/eff_short_wordlist_1.txt) | 1,296 words, 13 KB | 3–5, avg 4.5 | EFF site content is CC BY; the file itself carries no licence header | Best first choice: short familiar words, pre-filtered for profanity, homophones and hard spellings |
+| [EFF long wordlist](https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt) | 7,776 words, 106 KB | 3–9, avg 7.0 | same | More variety, longer words. Design notes [here](https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases) |
+| [dwyl/english-words](https://github.com/dwyl/english-words) | 479k words, ~4.5 MB | 1–31 | **Unlicense (public domain)** — the only clearly unencumbered one | But it is an exhaustive dictionary: obscure words, no frequency order, and too large to import |
+| [google-10000-english](https://github.com/first20hours/google-10000-english) | 10k words, ~80 KB | — | unclear (`NOASSERTION`, derived from Google's corpus) | Good words, unclear licence — avoid it in anything you redistribute |
+
+Format: one word per line. EFF's `24255<TAB>word` shape also works, as do `#` comments, blank lines, a
+BOM and CRLF line endings. Anything that is not a single printable non-space ASCII run is skipped, and
+the import report says how many lines were skipped and how many of the kept words your current
+character sets can actually type.
+
+Worth knowing:
+
+- **Use a frequency-ordered list, not a dictionary.** Rare words make poor practice material.
+- Words with hyphens (EFF has four: `drop-down`, `felt-tip`, `t-shirt`, `yo-yo`) are kept by the
+  importer but never used by the letter-only word drill.
+- The words shape needs **letter-only character sets**. Enable digits or symbols and drills fall back
+  to random character groups, because a word list cannot express them.
+- A word list is an asset, not history: **Clear all data** deliberately keeps it, and so does history
+  pruning.
+
 ## Data
 
 Nothing is uploaded and there is no analytics. Typing history stays in this browser's
