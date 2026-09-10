@@ -30,7 +30,11 @@ shells. It lives at `~/Library/pnpm/bin/pnpm`.
 
 ## Deploy
 
-Live at <https://yienschwen.github.io/yskeys/> after the first successful workflow run.
+Live at <https://github.yienschwen.top/yskeys/>.
+
+This repository has a **custom Pages domain** configured, so `https://yienschwen.github.io/yskeys/`
+answers `301` and redirects to it — the github.io URL is never the final destination. The base path
+below is unaffected either way.
 
 **One-time setup, and it must be done by a human:**
 
