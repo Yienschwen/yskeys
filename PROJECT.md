@@ -55,7 +55,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 - **Normal**: show live accuracy, CPM, elapsed time, error count. On finish show first-try accuracy,
   CPM, WPM, duration, backspaces, and the 5 weakest units of that session (with sample counts).
 - **Exceptions**: session abandoned mid-way (`Esc`/reload) → not persisted as a session; the
-  keystrokes already made are discarded rather than half-counted. Duration excluded while paused.
+  keystrokes already made are discarded rather than half-counted. Duration excludes paused time
+  **and** any gap longer than `IDLE_GAP_MS` (1.5 s): stepping away must not wreck the session's CPM.
 
 ### F4 — Local persistence
 - **Trigger**: session end (and after import / clear).
@@ -168,9 +169,9 @@ yskeys/
    ├─ main.ts          # wiring: views, keyboard, session lifecycle
    ├─ config.ts        # all tunables (γ, α, boost, mix ratios, lengths, size guard)
    ├─ vite-env.d.ts    # Vite ambient types (asset imports)
-   ├─ core/            # pure, no DOM: charset, layout, generator, adaptive, engine, metrics
+   ├─ core/            # pure, no DOM: charset, random, generator, engine, metrics (+ layout, adaptive)
    ├─ store/           # schema (+migrations), aggregate, persistence, transfer
-   ├─ ui/              # typing-view, result-view, history-view, chart, heatmap, styles.css
+   ├─ ui/              # dom, format, stat, typing-view, result-view, styles.css (+ history, chart, heatmap)
    └─ test/            # invariant tests for core/ and store/
 ```
 

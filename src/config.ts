@@ -47,6 +47,9 @@ export const EMBED_PROBABILITY = 0.7;
 /** Gaps longer than this are treated as "stepped away" and excluded. */
 export const IDLE_GAP_MS = 1500;
 
+/** Below this much active time, speed numbers are noise; report "—" instead. */
+export const MIN_SPEED_WINDOW_MS = 1000;
+
 /* --------------------------------------------------------------- keyboard -- */
 
 /** DESIGN.md §4.3 — Tab is deliberately NOT intercepted. */
