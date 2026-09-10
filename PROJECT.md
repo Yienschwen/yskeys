@@ -60,12 +60,14 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 
 ### F4 — Local persistence
 - **Trigger**: session end (and after import / clear).
-- **Normal**: merge the session delta into `Aggregates` (unigram, bigram, trigram, per-finger,
-  per-hand counters) and write to `localStorage` under one versioned key. Keep the last 200 session
-  summaries.
-- **Exceptions**: `localStorage` unavailable or quota exceeded → app keeps working in memory, shows
-  a persistent banner ("history is not being saved — export your data"), never throws. Payload over
-  3 MB → prune lowest-`attempts` trigrams first, then bigrams, and prompt an export.
+- **Normal**: merge the session delta into `Aggregates` — unigrams, bigrams, trigrams, and the
+  per-finger, per-hand, per-Shift and per-character-kind counters — and write to `localStorage` under
+  one versioned key, together with the settings. Keep the last 200 session summaries.
+- **Exceptions**: `localStorage` unavailable or quota exceeded → app keeps working in memory, shows a
+  persistent banner ("history is not being saved — export your data"), never throws. An unreadable
+  payload is parked under a `yskeys:corrupt:` key instead of being overwritten. Payload over
+  `MAX_PAYLOAD_CHARS` (2,000,000 UTF-16 code units, the unit browsers count against the ~5 MB quota)
+  → prune the lowest-`attempts` trigrams first, then bigrams, and prompt an export.
 
 ### F5 — Adaptive weighting
 - **Trigger**: every session build (default mode `adaptive`).
@@ -102,7 +104,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 - **Trigger**: user picks a JSON file and chooses **Replace** or **Merge**.
 - **Normal**: Replace overwrites local data after snapshotting the current state to a one-step
   undo backup. Merge adds counters field-by-field, unions sessions by `id`, keeps the earlier
-  `createdAt`.
+  `createdAt`. **Both modes adopt the settings from the file**, so the two modes differ only in how
+  the numbers combine and the file is the single source of truth for what is being practised.
 - **Exceptions**: malformed JSON / wrong `kind` → reject, keep current data, show the reason.
   `schemaVersion` newer than the app → refuse and ask the user to update the page. Older → run the
   migration chain. Merge with a file whose `schemaVersion` is older → migrate first, then merge.
@@ -156,6 +159,20 @@ point it is still "an adaptive single-char + bigram trainer", which is the core 
 | Deploy | GitHub Actions: `main` → install → test → build → `actions/deploy-pages`; no secrets |
 | Local dev | `pnpm dev` / `pnpm build` / `pnpm test` |
 
+### Data model
+
+The authoritative shapes live in `src/store/schema.ts`; this is only the summary.
+
+- One `localStorage` key (`yskeys:v1:store`) holds `{ schemaVersion, settings, aggregates, sessions }`.
+  Undo backups and parked unreadable payloads use separate key prefixes.
+- Recorded dimensions: `unigrams`, `bigrams`, `trigrams`, `byFinger`, `byHand`, `byShifted`, `byKind`.
+  Every dimension counts first-try attempts only, and keeps a per-unit confusion map of what was
+  actually typed.
+- Trigrams are all accumulated and persisted; ones below three attempts are only hidden from the UI.
+  The earlier "persist only ≥ 3 attempts" rule was dropped because it reset sub-threshold counts on
+  every write, so a trigram seen once per session could never accumulate.
+- An export file is `{ kind, schemaVersion, exportedAt, app, settings, aggregates, sessions }`.
+
 Layout:
 
 ```
@@ -169,9 +186,9 @@ yskeys/
    ├─ main.ts          # wiring: views, keyboard, session lifecycle
    ├─ config.ts        # all tunables (γ, α, boost, mix ratios, lengths, size guard)
    ├─ vite-env.d.ts    # Vite ambient types (asset imports)
-   ├─ core/            # pure, no DOM: charset, random, generator, engine, metrics (+ layout, adaptive)
-   ├─ store/           # schema (+migrations), aggregate, persistence, transfer
-   ├─ ui/              # dom, format, stat, typing-view, result-view, styles.css (+ history, chart, heatmap)
+   ├─ core/            # pure, no DOM: charset, random, generator, engine, metrics, layout (+ adaptive)
+   ├─ store/           # schema (+validators), migrations, aggregate, persistence, transfer
+   ├─ ui/              # dom, format, stat, typing-view, result-view, styles.css (+ banner, chart, history)
    └─ test/            # invariant tests for core/ and store/
 ```
 

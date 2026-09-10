@@ -5,6 +5,7 @@ import {
   charsPerMinute,
   emptyMetric,
   median,
+  mergeMetricMaps,
   mergeMetrics,
   rawAccuracy,
   recordAttempt,
@@ -190,5 +191,82 @@ describe('weakestUnits', () => {
 
   it('never returns more than the limit', () => {
     expect(weakestUnits(tallySession(play('ab', ['x', 'y'])), 1)).toHaveLength(1);
+  });
+});
+
+describe('tallySession dimensions', () => {
+  it('counts every adjacent triple once', () => {
+    const tally = tallySession(play('abcde', ['a', 'b', 'c', 'd', 'e']));
+    expect(Object.keys(tally.trigrams).sort()).toEqual(['abc', 'bcd', 'cde']);
+    expect(tally.trigrams['abc']).toEqual(metric(1, 1));
+  });
+
+  it('needs all three positions before a triple counts', () => {
+    expect(Object.keys(tallySession(play('abcde', ['a', 'b'])).trigrams)).toEqual([]);
+  });
+
+  it('fails a triple when any one of its positions was missed', () => {
+    const tally = tallySession(play('abc', ['a', 'x', 'c']));
+    expect(tally.trigrams['abc']).toEqual(metric(1, 0, { axc: 1 }));
+  });
+
+  it('buckets by finger, hand, shift state and character kind', () => {
+    // a: left pinky, plain, letter   f: left index, plain, letter
+    // J: right index, shifted, letter   7: right index, plain, digit
+    const tally = tallySession(play('afJ7', ['a', 'f', 'J', '7']));
+    expect(tally.byFinger['l-pinky']).toEqual(metric(1, 1));
+    expect(tally.byFinger['l-index']).toEqual(metric(1, 1));
+    expect(tally.byFinger['r-index']).toEqual(metric(2, 2));
+    expect(tally.byHand['left']).toEqual(metric(2, 2));
+    expect(tally.byHand['right']).toEqual(metric(2, 2));
+    expect(tally.byShifted['shifted']).toEqual(metric(1, 1));
+    expect(tally.byShifted['plain']).toEqual(metric(3, 3));
+    expect(tally.byKind['letter']).toEqual(metric(3, 3));
+    expect(tally.byKind['digit']).toEqual(metric(1, 1));
+  });
+
+  it('files a miss inside the bucket it was aimed at', () => {
+    // 's' is the left ring finger, so the miss lands on the pinky's record.
+    const tally = tallySession(play('a', ['s']));
+    expect(tally.byFinger['l-pinky']).toEqual(metric(1, 0, { s: 1 }));
+    expect(tally.byKind['letter']).toEqual(metric(1, 0, { s: 1 }));
+    expect(tally.byShifted['plain']).toEqual(metric(1, 0, { s: 1 }));
+  });
+
+  it('keeps every bucket total equal to the attempt count', () => {
+    const tally = tallySession(play('aA1?{}', ['a', 'A', '1', '?', '{', '}']));
+    const sum = (map: Record<string, Metric>): number =>
+      Object.values(map).reduce((total, entry) => total + entry.attempts, 0);
+
+    expect(tally.totals.attempts).toBe(6);
+    expect(sum(tally.byKind)).toBe(6);
+    expect(sum(tally.byFinger)).toBe(6);
+    expect(sum(tally.byHand)).toBe(6);
+    expect(sum(tally.byShifted)).toBe(6);
+  });
+
+  it('leaves the new dimensions empty for an untouched session', () => {
+    const tally = tallySession(createSession({ target: 'abc', groupSize: 3 }));
+    expect(tally.trigrams).toEqual({});
+    expect(tally.byKind).toEqual({});
+    expect(tally.byFinger).toEqual({});
+  });
+});
+
+describe('mergeMetricMaps', () => {
+  it('adds every unit and leaves both inputs untouched', () => {
+    const a = { x: metric(1, 1) };
+    const b = { x: metric(2, 1, { y: 1 }), z: metric(1, 0) };
+
+    const merged = mergeMetricMaps(a, b);
+
+    expect(merged['x']).toEqual(metric(3, 2, { y: 1 }));
+    expect(merged['z']).toEqual(metric(1, 0));
+    expect(a).toEqual({ x: metric(1, 1) });
+    expect(b['x']).toEqual(metric(2, 1, { y: 1 }));
+  });
+
+  it('is empty when both sides are empty', () => {
+    expect(mergeMetricMaps({}, {})).toEqual({});
   });
 });

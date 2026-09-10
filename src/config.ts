@@ -10,9 +10,37 @@ export const APP_VERSION = '0.0.0';
 export const SCHEMA_VERSION = 1;
 export const STORAGE_KEY = 'yskeys:v1:store';
 export const BACKUP_KEY_PREFIX = 'yskeys:backup:';
+/** Unreadable payloads are parked here instead of being overwritten. */
+export const CORRUPT_KEY_PREFIX = 'yskeys:corrupt:';
 export const MAX_SESSION_SUMMARIES = 200;
-export const MAX_PAYLOAD_BYTES = 3 * 1024 * 1024;
-export const MIN_TRIGRAM_ATTEMPTS = 3;
+
+/**
+ * Budget guard, measured in UTF-16 code units (`String.length`) because that is how
+ * browsers account against the ~5 MB localStorage quota. Deliberately lower than the
+ * 3 MB first sketched in PROJECT.md §5.3: 3 M code units is already ~6 MB of browser
+ * accounting, which is past the quota on some browsers.
+ */
+export const MAX_PAYLOAD_CHARS = 2_000_000;
+
+/** Checked before parsing, so a malformed 20 MB file cannot hang the page. */
+export const MAX_IMPORT_CHARS = 20_000_000;
+
+/**
+ * Trigrams below this many attempts stay out of the UI, but they are still
+ * accumulated and persisted. The original "only persist >= 3 attempts" rule silently
+ * reset sub-threshold counts on every write, so a trigram seen once per session could
+ * never reach the threshold.
+ */
+export const TRIGRAM_DISPLAY_MIN_ATTEMPTS = 3;
+
+/** Rows shown per weak-spot table before "show all" (PROJECT.md F7). */
+export const WEAK_TABLE_LIMIT = 15;
+
+/** Weakest units listed on the session result view (PROJECT.md F3). */
+export const RESULT_WEAK_LIMIT = 5;
+
+/** Sessions plotted in the CPM trend. */
+export const CHART_MAX_POINTS = 60;
 
 /* ---------------------------------------------------------------- session -- */
 

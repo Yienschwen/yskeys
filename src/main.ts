@@ -1,5 +1,5 @@
 import './ui/styles.css';
-import { APP_VERSION, DEFAULT_GROUP_COUNT, GROUP_SIZE } from './config';
+import { APP_VERSION, DEFAULT_GROUP_COUNT, GROUP_SIZE, RESULT_WEAK_LIMIT } from './config';
 import { CHARSETS, defaultCharsetIds } from './core/charset';
 import type { CharsetId } from './core/charset';
 import { applyEvent, createSession, cursorIndex, isFinished } from './core/engine';
@@ -42,8 +42,6 @@ interface Settings {
   readonly charsets: readonly CharsetId[];
   readonly groupCount: number;
 }
-
-const RESULT_LIMIT = 5;
 
 export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandle {
   const settings: Settings = { charsets: defaultCharsetIds(), groupCount: DEFAULT_GROUP_COUNT };
@@ -133,7 +131,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
         durationMs: state.activeMs,
         backspaces: state.backspaces,
         medianIntervalMs: median(state.intervals),
-        weakest: weakestUnits(tally, RESULT_LIMIT),
+        weakest: weakestUnits(tally, RESULT_WEAK_LIMIT),
         totalChars: state.target.length,
       },
       startSession,

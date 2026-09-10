@@ -1,5 +1,6 @@
 import { MIN_SPEED_WINDOW_MS, SMOOTHING_ALPHA, SMOOTHING_PRIOR } from '../config';
 import type { SessionState } from './engine';
+import { keyInfo } from './layout';
 
 /**
  * Accuracy, speed and per-unit tallies. `Metric` lives here rather than in
@@ -16,6 +17,12 @@ export interface Metric {
 export interface SessionTally {
   unigrams: Record<string, Metric>;
   bigrams: Record<string, Metric>;
+  trigrams: Record<string, Metric>;
+  /** Bucketed by the keyboard layout: finger, hand, Shift state, character kind. */
+  byFinger: Record<string, Metric>;
+  byHand: Record<string, Metric>;
+  byShifted: Record<string, Metric>;
+  byKind: Record<string, Metric>;
   totals: {
     attempts: number;
     firstTryCorrect: number;
@@ -62,16 +69,39 @@ export function mergeMetrics(a: Metric, b: Metric): Metric {
   };
 }
 
+/** Folds a second metric map into the first without mutating either. */
+export function mergeMetricMaps(
+  a: Readonly<Record<string, Metric>>,
+  b: Readonly<Record<string, Metric>>,
+): Record<string, Metric> {
+  const merged: Record<string, Metric> = {};
+  for (const [unit, metric] of Object.entries(a)) {
+    merged[unit] = metric;
+  }
+  for (const [unit, metric] of Object.entries(b)) {
+    const existing = merged[unit];
+    merged[unit] = existing === undefined ? metric : mergeMetrics(existing, metric);
+  }
+  return merged;
+}
+
 /**
- * Folds a session's locked first attempts into unigram and bigram counts.
+ * Folds a session's locked first attempts into every dimension the history view
+ * needs: single characters, adjacent pairs, adjacent triples, and the finger, hand,
+ * Shift and character-kind buckets from the keyboard layout.
  *
- * Bigram rule (PROJECT.md §6.3): an adjacent pair counts once, and only be
- * correct if BOTH positions were correct on their first attempt. Re-typing after
- * a Backspace cannot create a second sample, because `firstAttempt` is immutable.
+ * n-gram rule (PROJECT.md §6.3): an n-gram counts once, and counts as correct only if
+ * EVERY position in it was correct on its first attempt. Re-typing after a Backspace
+ * cannot create a second sample, because `firstAttempt` is immutable.
  */
 export function tallySession(state: SessionState): SessionTally {
   const unigrams: Record<string, Metric> = {};
   const bigrams: Record<string, Metric> = {};
+  const trigrams: Record<string, Metric> = {};
+  const byFinger: Record<string, Metric> = {};
+  const byHand: Record<string, Metric> = {};
+  const byShifted: Record<string, Metric> = {};
+  const byKind: Record<string, Metric> = {};
   let attempts = 0;
   let firstTryCorrect = 0;
 
@@ -91,6 +121,19 @@ export function tallySession(state: SessionState): SessionTally {
     if (correct) {
       firstTryCorrect += 1;
     }
+
+    const info = keyInfo(expected);
+    if (info) {
+      byFinger[info.finger] = recordAttempt(
+        byFinger[info.finger] ?? emptyMetric(),
+        typed,
+        correct,
+      );
+      byHand[info.hand] = recordAttempt(byHand[info.hand] ?? emptyMetric(), typed, correct);
+      const shiftKey = info.shifted ? 'shifted' : 'plain';
+      byShifted[shiftKey] = recordAttempt(byShifted[shiftKey] ?? emptyMetric(), typed, correct);
+      byKind[info.kind] = recordAttempt(byKind[info.kind] ?? emptyMetric(), typed, correct);
+    }
   }
 
   for (let index = 0; index < state.target.length - 1; index += 1) {
@@ -106,9 +149,34 @@ export function tallySession(state: SessionState): SessionTally {
     bigrams[pair] = recordAttempt(bigrams[pair] ?? emptyMetric(), first + second, correct);
   }
 
+  for (let index = 0; index < state.target.length - 2; index += 1) {
+    const first = state.firstAttempt[index];
+    const second = state.firstAttempt[index + 1];
+    const third = state.firstAttempt[index + 2];
+    if (first === undefined || second === undefined || third === undefined) {
+      continue;
+    }
+    const expectedFirst = state.target.charAt(index);
+    const expectedSecond = state.target.charAt(index + 1);
+    const expectedThird = state.target.charAt(index + 2);
+    const triple = expectedFirst + expectedSecond + expectedThird;
+    const correct =
+      first === expectedFirst && second === expectedSecond && third === expectedThird;
+    trigrams[triple] = recordAttempt(
+      trigrams[triple] ?? emptyMetric(),
+      first + second + third,
+      correct,
+    );
+  }
+
   return {
     unigrams,
     bigrams,
+    trigrams,
+    byFinger,
+    byHand,
+    byShifted,
+    byKind,
     totals: { attempts, firstTryCorrect, backspaces: state.backspaces },
   };
 }

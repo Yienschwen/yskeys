@@ -69,18 +69,31 @@ describe('session shape', () => {
 });
 
 describe('persistence limits', () => {
-  it('keeps the payload guard safely under the localStorage ceiling', () => {
-    expect(config.MAX_PAYLOAD_BYTES).toBeGreaterThan(0);
-    expect(config.MAX_PAYLOAD_BYTES).toBeLessThan(5 * 1024 * 1024);
+  it('keeps the payload guard under the localStorage ceiling', () => {
+    // Measured in UTF-16 code units, which is how browsers account the ~5 MB quota.
+    expect(config.MAX_PAYLOAD_CHARS).toBeGreaterThan(100_000);
+    expect(config.MAX_PAYLOAD_CHARS).toBeLessThan(3_000_000);
+  });
+
+  it('allows a larger import than the store budget, but still bounds it', () => {
+    expect(config.MAX_IMPORT_CHARS).toBeGreaterThan(config.MAX_PAYLOAD_CHARS);
+    expect(config.MAX_IMPORT_CHARS).toBeLessThan(100_000_000);
   });
 
   it('namespaces the storage keys', () => {
     expect(config.STORAGE_KEY.startsWith('yskeys:')).toBe(true);
     expect(config.BACKUP_KEY_PREFIX.startsWith('yskeys:')).toBe(true);
+    expect(config.CORRUPT_KEY_PREFIX.startsWith('yskeys:')).toBe(true);
   });
 
-  it('records trigrams only past the noise threshold', () => {
-    expect(config.MIN_TRIGRAM_ATTEMPTS).toBeGreaterThanOrEqual(2);
+  it('hides noisy trigrams from the UI without refusing to store them', () => {
+    expect(config.TRIGRAM_DISPLAY_MIN_ATTEMPTS).toBeGreaterThanOrEqual(2);
+  });
+
+  it('offers bounded table and chart sizes', () => {
+    expect(config.WEAK_TABLE_LIMIT).toBeGreaterThan(0);
+    expect(config.RESULT_WEAK_LIMIT).toBeGreaterThan(0);
+    expect(config.CHART_MAX_POINTS).toBeGreaterThan(1);
   });
 });
 
