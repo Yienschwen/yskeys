@@ -2,8 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { WORD_MAX_LENGTH } from '../config';
 import { charsFor, defaultCharsetIds } from '../core/charset';
 import type { CharsetId } from '../core/charset';
-import { buildUniformDrill, buildWordDrill, isWordListUsable, usableWords } from '../core/generator';
-import type { SessionSpec } from '../core/generator';
+import {
+  buildAdaptiveDrill,
+  buildUniformDrill,
+  buildWordDrill,
+  buildWordIndex,
+  embedUnit,
+  isWordListUsable,
+  materializeUnit,
+  usableWords,
+} from '../core/generator';
+import type { SessionSpec, Drill } from '../core/generator';
+import { createRng } from '../core/random';
 
 const baseSpec: SessionSpec = {
   charsets: defaultCharsetIds(),
@@ -195,5 +205,126 @@ describe('usableWords and isWordListUsable', () => {
   it('is unusable when no letter charset is enabled', () => {
     expect(usableWords(['acid'], ['digits'])).toEqual([]);
     expect(isWordListUsable(['acid'], ['digits'])).toBe(false);
+  });
+});
+
+describe('buildWordIndex and materializeUnit', () => {
+  it('indexes single characters and adjacent pairs', () => {
+    const index = buildWordIndex(['the', 'them']);
+    expect(index.get('th')).toEqual([0, 1]);
+    expect(index.get('he')).toEqual([0, 1]);
+    expect(index.get('e')).toEqual([0, 1]);
+    expect(index.get('hh')).toBeUndefined();
+  });
+
+  it('keeps the drawn unit contiguous when it embeds it', () => {
+    const rng = createRng(21);
+    for (let index = 0; index < 300; index += 1) {
+      const group = embedUnit('th', ['lowercase'], rng);
+      expect(group, group).toContain('th');
+      expect(group.length).toBeGreaterThanOrEqual(2);
+      expect(group.length).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it('targets a 3-5 character group rather than a fragment', () => {
+    const rng = createRng(5);
+    const lengths = Array.from({ length: 200 }, () => embedUnit('a', ['lowercase'], rng).length);
+    const embedded = lengths.filter((length) => length > 1);
+    expect(embedded.length).toBeGreaterThan(100);
+    const average = embedded.reduce((total, length) => total + length, 0) / embedded.length;
+    expect(average).toBeGreaterThan(3);
+  });
+
+  it('returns a word containing the unit, and falls back when no word has it', () => {
+    const words = ['acid', 'acorn', 'bread'];
+    const context = {
+      shape: 'words' as const,
+      charsets: ['lowercase'] as const,
+      words,
+      index: buildWordIndex(words),
+      rng: createRng(2),
+    };
+    expect(materializeUnit('ac', context)).toContain('ac');
+    expect(words).toContain(materializeUnit('zz', context));
+  });
+});
+
+describe('buildAdaptiveDrill', () => {
+  const source = {
+    unigrams: { a: { attempts: 50, firstTryCorrect: 10, wrongTyped: {} } },
+    bigrams: {},
+    charsets: ['lowercase'] as const,
+  };
+
+  it('reaches the character target with character groups', () => {
+    const drill = buildAdaptiveDrill({
+      shape: 'uniform',
+      charsets: ['lowercase'],
+      targetChars: 40,
+      source,
+      seed: 3,
+    });
+
+    expect(drill.text.replaceAll(' ', '').length).toBeGreaterThanOrEqual(40);
+    expect(drill.text).toBe(drill.groups.join(' '));
+    expect(drill.groups.every((group) => group.length >= 1 && group.length <= 5)).toBe(true);
+  });
+
+  it('produces a different drill when the weakness moves to another unit', () => {
+    const build = (weak: 'a' | 'b'): Drill =>
+      buildAdaptiveDrill({
+        shape: 'uniform',
+        charsets: ['lowercase'],
+        targetChars: 120,
+        source: {
+          unigrams: {
+            a: { attempts: 100, firstTryCorrect: weak === 'a' ? 50 : 100, wrongTyped: {} },
+            b: { attempts: 100, firstTryCorrect: weak === 'b' ? 50 : 100, wrongTyped: {} },
+          },
+          bigrams: {},
+          charsets: ['lowercase'],
+        },
+        seed: 8,
+      });
+
+    // The distribution itself is proven in adaptive.test.ts over 10,000 draws; here it
+    // only has to be visible that the recorded history is what drives the drill.
+    expect(build('a').text).not.toBe(build('b').text);
+  });
+
+  it('only emits words that can satisfy the drawn unit', () => {
+    const words = ['quick', 'queen', 'quiet', 'other', 'thing'];
+    const drill = buildAdaptiveDrill({
+      shape: 'words',
+      charsets: ['lowercase'],
+      targetChars: 30,
+      words,
+      // q has no word in the list below, so it must not be drawable here.
+      source: {
+        unigrams: { q: { attempts: 20, firstTryCorrect: 1, wrongTyped: {} } },
+        bigrams: {},
+        charsets: ['lowercase'],
+      },
+      seed: 4,
+    });
+
+    // Nothing in the list contains a q other than the q words themselves, so the pool
+    // collapses to the units of the available words.
+    expect(drill.text.replaceAll(' ', '').length).toBeGreaterThanOrEqual(30);
+    expect(drill.groups.every((word) => words.includes(word))).toBe(true);
+  });
+
+  it('refuses to build when no unit can be materialized', () => {
+    expect(() =>
+      buildAdaptiveDrill({
+        shape: 'words',
+        charsets: ['lowercase'],
+        targetChars: 30,
+        words: [],
+        source,
+        seed: 1,
+      }),
+    ).toThrow(/no units are available/);
   });
 });

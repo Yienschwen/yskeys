@@ -9,7 +9,7 @@ import {
 } from './config';
 import { applyEvent, createSession, cursorIndex, isFinished } from './core/engine';
 import type { Judgement, SessionEvent, SessionState } from './core/engine';
-import { buildUniformDrill, buildWordDrill, isWordListUsable, usableWords } from './core/generator';
+import { buildAdaptiveDrill, buildUniformDrill, buildWordDrill, isWordListUsable, usableWords } from './core/generator';
 import type { Drill, DrillShape } from './core/generator';
 import {
   charsPerMinute,
@@ -30,8 +30,8 @@ import {
   storageAvailable,
 } from './store/persistence';
 import type { StorageLike } from './store/persistence';
-import { createSessionId, defaultStore, preferredShape } from './store/schema';
-import type { Settings, Store } from './store/schema';
+import { createSessionId, defaultStore, preferredMode, preferredShape } from './store/schema';
+import type { Settings, Store, TrainingMode } from './store/schema';
 import { buildExportFile, importFromText, parseExportFile, serializeExport } from './store/transfer';
 import type { ImportMode } from './store/transfer';
 import { loadWordList, removeWordList as removeStoredWordList, saveWordList } from './store/wordlist';
@@ -98,6 +98,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
   let view: TypingView | null = null;
   let mode: Mode = 'practice';
   let activeShape: DrillShape = 'uniform';
+  let activeMode: TrainingMode = 'adaptive';
   let lastJudgement: Judgement | null = null;
   let sessionCount = 0;
   let sessionWallStart = now();
@@ -261,21 +262,47 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
   }
 
   function buildDrillFor(seed: number): { drill: Drill; shape: DrillShape } {
-    if (preferredShape(store.settings) === 'words') {
-      const state = wordsState();
-      const list = wordList;
-      if (state.available && list !== null) {
+    const targetChars = store.settings.groupCount * GROUP_SIZE;
+    const list = wordList;
+    const useWords = preferredShape(store.settings) === 'words' && wordsState().available && list !== null;
+    const shape: DrillShape = useWords ? 'words' : 'uniform';
+    const wordSpec = useWords && list !== null ? { words: [...list.words] } : {};
+
+    if (preferredMode(store.settings) === 'adaptive') {
+      try {
         return {
-          drill: buildWordDrill({
+          drill: buildAdaptiveDrill({
+            shape,
             charsets: store.settings.charsets,
-            targetChars: store.settings.groupCount * GROUP_SIZE,
-            words: list.words,
+            targetChars,
+            ...wordSpec,
+            source: {
+              unigrams: store.aggregates.unigrams,
+              bigrams: store.aggregates.bigrams,
+              charsets: store.settings.charsets,
+            },
             seed,
           }),
-          shape: 'words',
+          shape,
         };
+      } catch {
+        // Nothing could be materialized (an empty word pool, say). Fall through to the
+        // plain generators rather than refusing to start a session at all.
       }
     }
+
+    if (useWords && list !== null) {
+      return {
+        drill: buildWordDrill({
+          charsets: store.settings.charsets,
+          targetChars,
+          words: list.words,
+          seed,
+        }),
+        shape: 'words',
+      };
+    }
+
     return {
       drill: buildUniformDrill({
         charsets: store.settings.charsets,
@@ -291,6 +318,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
     sessionCount += 1;
     const built = buildDrillFor(nextSeed());
     activeShape = built.shape;
+    activeMode = preferredMode(store.settings);
     session = createSession({ target: built.drill.text, groupSize: GROUP_SIZE });
     sessionWallStart = now();
     lastJudgement = null;
@@ -325,7 +353,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
         settings: store.settings,
         id: createSessionId(sessionWallStart, sessionCount),
         startedAt: sessionWallStart,
-        mode: 'uniform',
+        mode: activeMode,
         shape: activeShape,
         worstLimit: RESULT_WEAK_LIMIT,
       }),
@@ -400,6 +428,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
       store,
       canUndo: backupKey !== null && storage !== null,
       wordList: wordListInfo(),
+      mode: preferredMode(store.settings),
       actions: {
         export: exportHistory,
         importFile: (file) => {
@@ -413,6 +442,9 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
           void importWordListFile(file);
         },
         removeWordList,
+        setMode: (mode) => {
+          changeSettings({ ...store.settings, mode });
+        },
       },
     });
   }
@@ -573,7 +605,12 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
   function changeSettings(next: Settings): void {
     store = {
       ...store,
-      settings: { charsets: [...next.charsets], groupCount: next.groupCount, ...(next.shape === undefined ? {} : { shape: next.shape }) },
+      settings: {
+        charsets: [...next.charsets],
+        groupCount: next.groupCount,
+        ...(next.shape === undefined ? {} : { shape: next.shape }),
+        ...(next.mode === undefined ? {} : { mode: next.mode }),
+      },
     };
     settingsControls.update(store.settings);
     refreshWordsState();

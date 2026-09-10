@@ -54,6 +54,7 @@ describe('settings controls', () => {
       charsets: ['lowercase', 'uppercase'],
       groupCount: 30,
       shape: 'words',
+      mode: 'adaptive',
     });
     expect(pill(controls.element, 'A–Z').getAttribute('aria-pressed')).toBe('true');
   });
@@ -67,6 +68,7 @@ describe('settings controls', () => {
       charsets: ['digits'],
       groupCount: 30,
       shape: 'words',
+      mode: 'adaptive',
     });
     expect(pill(controls.element, 'a–z').getAttribute('aria-pressed')).toBe('false');
   });
@@ -105,6 +107,7 @@ describe('settings controls', () => {
       charsets: ['lowercase'],
       groupCount: 60,
       shape: 'words',
+      mode: 'adaptive',
     });
   });
 
@@ -140,6 +143,7 @@ describe('settings controls', () => {
       charsets: ['lowercase'],
       groupCount: 30,
       shape: 'uniform',
+      mode: 'adaptive',
     });
     expect(segment(controls.element, 'Characters').getAttribute('aria-pressed')).toBe('true');
   });

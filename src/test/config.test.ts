@@ -8,17 +8,24 @@ import * as config from '../config';
  */
 
 describe('adaptive sampling constants', () => {
-  it('makes the pool shares sum to exactly 1', () => {
-    const total = config.WEAK_POOL_SHARE + config.MID_POOL_SHARE + config.RANDOM_SHARE;
-    expect(total).toBeCloseTo(1, 10);
+  it('keeps one uniform exploration share that cannot starve a unit', () => {
+    expect(config.EXPLORATION_SHARE).toBeGreaterThan(0);
+    expect(config.EXPLORATION_SHARE).toBeLessThan(0.5);
   });
 
-  it('leaves a non-zero random share so strong units cannot be forgotten', () => {
-    expect(config.RANDOM_SHARE).toBeGreaterThan(0);
-  });
-
-  it('keeps the weight floor above zero so no unit starves', () => {
+  it('keeps the weight floor tiny, since exploration is what prevents starvation', () => {
+    // A floor big enough to matter would flatten the weak:strong ratio that the
+    // weights exist to express (0.05 capped it at 4.6x, under the 5x acceptance target).
     expect(config.WEIGHT_FLOOR).toBeGreaterThan(0);
+    expect(config.WEIGHT_FLOOR).toBeLessThan(0.02);
+  });
+
+  it('treats an unmeasured unit as mid-range rather than as strong', () => {
+    const unseen = config.UNSEEN_WEIGHT;
+    const perfect = Math.pow(1 - 0.9857, config.WEIGHT_EXPONENT);
+    const fiftyPercent = Math.pow(1 - 0.519, config.WEIGHT_EXPONENT);
+    expect(unseen).toBeGreaterThan(Math.max(perfect, config.WEIGHT_FLOOR));
+    expect(unseen).toBeLessThan(fiftyPercent);
   });
 
   it('boosts under-sampled units', () => {
@@ -30,9 +37,21 @@ describe('adaptive sampling constants', () => {
     expect(config.WEIGHT_EXPONENT).toBeGreaterThan(0);
   });
 
-  it('keeps the weak pool a strict minority of units', () => {
-    expect(config.WEAK_POOL_FRACTION).toBeGreaterThan(0);
-    expect(config.WEAK_POOL_FRACTION).toBeLessThan(1);
+  it('decays a unit that keeps coming up inside one session', () => {
+    expect(config.SESSION_UNIT_DECAY).toBeGreaterThan(0);
+    expect(config.SESSION_UNIT_DECAY).toBeLessThan(1);
+  });
+
+  it('only counts bigrams that have actually been seen', () => {
+    expect(config.MIN_OBSERVED_BIGRAM_ATTEMPTS).toBeGreaterThanOrEqual(1);
+  });
+
+  it('starts from the home row and leans away from Shift', () => {
+    const rows = config.COLD_START_ROW_WEIGHT;
+    expect(rows[3]).toBeGreaterThan(rows[2] ?? 0);
+    expect(rows[2]).toBeGreaterThan(rows[4] ?? 0);
+    expect(rows[4]).toBeGreaterThan(rows[1] ?? 0);
+    expect(config.COLD_START_SHIFTED_FACTOR).toBeLessThan(1);
   });
 
   it('uses a probability for embedding', () => {

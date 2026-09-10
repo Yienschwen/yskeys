@@ -1,7 +1,7 @@
 import { CHART_MAX_POINTS, LOW_SAMPLE_ATTEMPTS, TRIGRAM_DISPLAY_MIN_ATTEMPTS, WEAK_TABLE_LIMIT } from '../config';
 import { sortUnitRows, unitRows } from '../core/metrics';
 import type { Metric, SortDirection, UnitRow, UnitSortKey } from '../core/metrics';
-import type { Store } from '../store/schema';
+import type { Store, TrainingMode } from '../store/schema';
 import { createCpmChart } from './chart';
 import { h } from './dom';
 import { formatCount, displayUnit, formatPercent, formatSpeed } from './format';
@@ -20,6 +20,7 @@ export interface HistoryActions {
   readonly undo: () => void;
   readonly importWordList: (file: File) => void;
   readonly removeWordList: () => void;
+  readonly setMode: (mode: TrainingMode) => void;
 }
 
 export interface WordListInfo {
@@ -33,6 +34,9 @@ export interface HistoryInput {
   readonly actions: HistoryActions;
   readonly canUndo: boolean;
   readonly wordList: WordListInfo | null;
+  /** Weighting mode, which lives here rather than in the header: it is a control for
+   *  checking whether the adaptive part helps, not a daily setting. */
+  readonly mode: TrainingMode;
 }
 
 export function createHistoryView(input: HistoryInput): HTMLElement {
@@ -56,6 +60,7 @@ export function createHistoryView(input: HistoryInput): HTMLElement {
         'No finished sessions yet. Practise a drill, or import a file to restore an earlier history.',
       ),
     );
+    root.append(createModePanel(input));
     root.append(createDataPanel(input));
     return root;
   }
@@ -71,9 +76,44 @@ export function createHistoryView(input: HistoryInput): HTMLElement {
   );
   root.append(createUnitTable('By finger', store.aggregates.byFinger));
   root.append(createBreakdown(store));
+  root.append(createModePanel(input));
   root.append(createDataPanel(input));
 
   return root;
+}
+
+function createModePanel(input: HistoryInput): HTMLElement {
+  const panel = h('section', 'panel');
+  panel.append(h('h3', 'panel__title', 'Weighting'));
+  panel.append(
+    h(
+      'p',
+      'view__lead',
+      'Adaptive spends most repetitions on the units you miss most, drawing from words that contain ' +
+        'them. Uniform draws everything equally \u2014 it is the control that shows whether the ' +
+        'adaptive part is doing anything at all.',
+    ),
+  );
+
+  const group = h('div', 'segmented');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Weighting mode for the next drill');
+  for (const [value, label] of [
+    ['adaptive', 'Adaptive'],
+    ['uniform', 'Uniform'],
+  ] as ReadonlyArray<readonly [TrainingMode, string]>) {
+    const on = value === input.mode;
+    const button = h('button', on ? 'segment is-on' : 'segment', label);
+    button.type = 'button';
+    button.setAttribute('aria-pressed', String(on));
+    button.addEventListener('click', () => {
+      input.actions.setMode(value);
+    });
+    group.append(button);
+  }
+
+  panel.append(group);
+  return panel;
 }
 
 function createTotals(store: Store): HTMLElement {

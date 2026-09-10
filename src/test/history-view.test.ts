@@ -71,12 +71,14 @@ function render(store: Store, overrides: Partial<Parameters<typeof createHistory
     undo: vi.fn(),
     importWordList: vi.fn(),
     removeWordList: vi.fn(),
+    setMode: vi.fn(),
   };
   const element = createHistoryView({
     store,
     actions,
     canUndo: false,
     wordList: null,
+    mode: 'adaptive',
     ...overrides,
   });
   document.body.append(element);
@@ -252,5 +254,28 @@ describe('history view', () => {
 
     expect(element.textContent).toContain('No word list yet');
     expect(element.textContent).toContain('Import word list');
+  });
+
+  it('offers the weighting mode and reports a change', () => {
+    const { element, actions } = render(storeWithSessions(), { mode: 'adaptive' });
+
+    expect(element.textContent).toContain('Weighting');
+    buttonByText(element, 'Uniform').click();
+    expect(actions.setMode).toHaveBeenCalledWith('uniform');
+  });
+
+  it('marks the active weighting mode', () => {
+    const { element } = render(storeWithSessions(), { mode: 'uniform' });
+    const uniform = [...element.querySelectorAll('button.segment')].find(
+      (button) => button.textContent === 'Uniform',
+    );
+
+    expect(uniform?.getAttribute('aria-pressed')).toBe('true');
+    expect(uniform?.className).toContain('is-on');
+  });
+
+  it('offers the weighting mode even before any history exists', () => {
+    const { element } = render(defaultStore(0));
+    expect(element.textContent).toContain('Weighting');
   });
 });

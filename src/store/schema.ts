@@ -9,15 +9,29 @@ import type { Metric } from '../core/metrics';
  * trusted. Validation lives next to the shape so the two cannot drift apart.
  */
 
+/**
+ * How units are chosen for the next drill. Orthogonal to `DrillShape`, which is the
+ * *format* of the drill: `shape` says "words or character groups", `mode` says "chosen
+ * by weakness or uniformly". The settings UI labels them Words/Characters and
+ * Adaptive/Uniform so the two never collide in front of the user.
+ */
+export type TrainingMode = 'adaptive' | 'uniform';
+
 export interface Settings {
   charsets: CharsetId[];
   groupCount: number;
   /** Optional: exports written before the word list existed must still validate. */
   shape?: DrillShape;
+  /** Optional: exports written before adaptive weighting must still validate. */
+  mode?: TrainingMode;
 }
 
 export function preferredShape(settings: Settings): DrillShape {
   return settings.shape ?? 'words';
+}
+
+export function preferredMode(settings: Settings): TrainingMode {
+  return settings.mode ?? 'adaptive';
 }
 
 /** Metric keys that every aggregate map must have. */
@@ -59,7 +73,7 @@ export interface SessionSummary {
   id: string;
   startedAt: number;
   durationMs: number;
-  mode: 'adaptive' | 'uniform';
+  mode: TrainingMode;
   /** Which drill shape produced this session; CPM is not comparable across shapes. */
   shape?: DrillShape;
   charsets: CharsetId[];
@@ -81,7 +95,12 @@ export interface Store {
 }
 
 export function defaultSettings(): Settings {
-  return { charsets: [...defaultCharsetIds()], groupCount: DEFAULT_GROUP_COUNT, shape: 'words' };
+  return {
+    charsets: [...defaultCharsetIds()],
+    groupCount: DEFAULT_GROUP_COUNT,
+    shape: 'words',
+    mode: 'adaptive',
+  };
 }
 
 export function emptyAggregates(now: number): Aggregates {
@@ -170,7 +189,11 @@ export function isSettings(value: unknown): value is Settings {
     return false;
   }
   const shape = value['shape'];
-  return shape === undefined || shape === 'words' || shape === 'uniform';
+  if (shape !== undefined && shape !== 'words' && shape !== 'uniform') {
+    return false;
+  }
+  const mode = value['mode'];
+  return mode === undefined || mode === 'adaptive' || mode === 'uniform';
 }
 
 export function isWorstUnit(value: unknown): value is WorstUnit {

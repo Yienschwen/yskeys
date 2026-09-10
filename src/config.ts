@@ -81,17 +81,49 @@ export const SMOOTHING_PRIOR = 0.9;
 /* ------------------------------------------------- adaptive sampling (F5) -- */
 
 export const WEIGHT_EXPONENT = 2;
-export const WEIGHT_FLOOR = 0.05;
+
+/**
+ * Deliberately tiny. Starvation is prevented by the exploration draw, not by the floor,
+ * and a large floor actively compresses the weak:strong ratio: at 0.05 a 50%-accuracy
+ * unit weighed only 4.6x a 99% one, below the 5x that acceptance criterion #6 asks for.
+ */
+export const WEIGHT_FLOOR = 0.01;
+
 export const SAMPLE_BOOST = 2.5;
 export const SAMPLE_BOOST_THRESHOLD = 10;
 
-/** 60% weakest units / 25% next tier / 15% uniform. Must sum to 1. */
-export const WEAK_POOL_SHARE = 0.6;
-export const MID_POOL_SHARE = 0.25;
-export const RANDOM_SHARE = 0.15;
-export const WEAK_POOL_FRACTION = 0.3;
+/**
+ * An unmeasured unit is treated as if it were at 60% accuracy. Using the display prior
+ * (0.9) here instead would make the keys you have never typed the ones you practise
+ * least, which is exactly backwards.
+ */
+export const UNSEEN_WEIGHT = 0.16;
 
-/** Chance a drawn unit is embedded in a longer 3–5 char group. */
+/** Only observed bigrams compete: 676 unobserved ones would swamp the candidate pool. */
+export const MIN_OBSERVED_BIGRAM_ATTEMPTS = 1;
+
+/** 85% of draws follow the weights, 15% are uniform so no unit can starve. */
+export const EXPLORATION_SHARE = 0.15;
+
+/**
+ * A unit already drawn this session has its weight multiplied by this per prior use, so
+ * one weak key cannot turn a whole drill into the same word over and over.
+ */
+export const SESSION_UNIT_DECAY = 0.5;
+
+/** Cold start: no history, so walk outwards from the home row. */
+export const COLD_START_ROW_WEIGHT: Readonly<Record<number, number>> = {
+  1: 0.4,
+  2: 0.75,
+  3: 1,
+  4: 0.6,
+  5: 0.5,
+};
+
+/** Reaching for Shift is its own skill, so shifted characters start lower. */
+export const COLD_START_SHIFTED_FACTOR = 0.5;
+
+/** Only the characters shape uses this: chance a drawn unit is embedded in a 3-5 char group. */
 export const EMBED_PROBABILITY = 0.7;
 
 /* ----------------------------------------------------------------- latency -- */

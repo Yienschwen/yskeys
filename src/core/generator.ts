@@ -1,4 +1,12 @@
-import { CAPITALIZE_PROBABILITY, MIN_USABLE_WORDS, WORD_MAX_LENGTH, WORD_MIN_LENGTH } from '../config';
+import {
+  CAPITALIZE_PROBABILITY,
+  EMBED_PROBABILITY,
+  MIN_USABLE_WORDS,
+  WORD_MAX_LENGTH,
+  WORD_MIN_LENGTH,
+} from '../config';
+import { buildCandidates, sampleCandidate } from './adaptive';
+import type { AdaptiveSource } from './adaptive';
 import { charsFor, getCharset } from './charset';
 import type { CharsetId } from './charset';
 import { createRng, randomInt } from './random';
@@ -192,4 +200,189 @@ function pickWord(pool: readonly string[], avoid: string, rng: Rng): string {
     }
   }
   return fallback;
+}
+
+/* -------------------------------------------------------------- adaptive -- */
+
+/**
+ * Maps every character and every adjacent pair in the list to the words containing it.
+ * One pass over the list, and from then on "give me a word with `q` in it" is a lookup.
+ */
+export function buildWordIndex(words: readonly string[]): Map<string, number[]> {
+  const index = new Map<string, number[]>();
+  words.forEach((word, wordIndex) => {
+    for (let position = 0; position < word.length; position += 1) {
+      addToIndex(index, word.charAt(position), wordIndex);
+      if (position + 2 <= word.length) {
+        addToIndex(index, word.slice(position, position + 2), wordIndex);
+      }
+    }
+  });
+  return index;
+}
+
+/** Words are walked in order, so a repeated unit inside one word is always the tail. */
+function addToIndex(index: Map<string, number[]>, unit: string, wordIndex: number): void {
+  const list = index.get(unit);
+  if (list === undefined) {
+    index.set(unit, [wordIndex]);
+    return;
+  }
+  if (list[list.length - 1] !== wordIndex) {
+    list.push(wordIndex);
+  }
+}
+
+export interface MaterializeContext {
+  readonly shape: DrillShape;
+  readonly charsets: readonly CharsetId[];
+  readonly words: readonly string[];
+  readonly index: ReadonlyMap<string, readonly number[]>;
+  readonly rng: Rng;
+}
+
+/**
+ * Turns a drawn unit into actual drill text.
+ *
+ * In the words shape the unit is guaranteed to appear, which is the whole point: it is
+ * the only way a rarely used key gets practised at all, given that only 99 of EFF's 7776
+ * words contain a `q`.
+ */
+export function materializeUnit(
+  unit: string,
+  context: MaterializeContext,
+  avoidText?: string,
+): string {
+  // 'uniform' is the character-group *format* here, not the weighting mode.
+  if (context.shape === 'uniform') {
+    return embedUnit(unit, context.charsets, context.rng);
+  }
+  const word = wordForUnit(context.index.get(unit), context.words, context.rng, avoidText);
+  return word ?? randomWord(context.words, context.rng, avoidText) ?? unit;
+}
+
+/**
+ * Filler is only ever added before or after the unit, never inside it: splitting a
+ * bigram would mean the drill no longer contains the thing that was drawn.
+ */
+export function embedUnit(unit: string, charsets: readonly CharsetId[], rng: Rng): string {
+  if (rng() >= EMBED_PROBABILITY) {
+    return unit;
+  }
+  const pool = charsFor(charsets);
+  if (pool.length === 0) {
+    return unit;
+  }
+  // Target a 3-5 character group whatever the unit's own length, so an adaptive
+  // character drill is not a stream of one- and two-character fragments.
+  const groupLength = 3 + randomInt(rng, 3);
+  let extra = Math.max(0, groupLength - unit.length);
+  let before = '';
+  let after = '';
+  while (extra > 0) {
+    const filler = pool.charAt(randomInt(rng, pool.length));
+    if (rng() < 0.5) {
+      before += filler;
+    } else {
+      after += filler;
+    }
+    extra -= 1;
+  }
+  return before + unit + after;
+}
+
+function wordForUnit(
+  list: readonly number[] | undefined,
+  words: readonly string[],
+  rng: Rng,
+  avoidText?: string,
+): string | null {
+  if (list === undefined || list.length === 0) {
+    return null;
+  }
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const index = list[randomInt(rng, list.length)];
+    const word = index === undefined ? undefined : words[index];
+    if (word !== undefined && word !== avoidText) {
+      return word;
+    }
+  }
+  const first = list[0];
+  return first === undefined ? null : (words[first] ?? null);
+}
+
+function randomWord(
+  words: readonly string[],
+  rng: Rng,
+  avoidText?: string,
+): string | null {
+  if (words.length === 0) {
+    return null;
+  }
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const word = words[randomInt(rng, words.length)];
+    if (word !== undefined && word !== avoidText) {
+      return word;
+    }
+  }
+  return words[0] ?? null;
+}
+
+export interface AdaptiveDrillSpec {
+  readonly shape: DrillShape;
+  readonly charsets: readonly CharsetId[];
+  /** Non-space characters to reach, for both shapes. */
+  readonly targetChars: number;
+  readonly words?: readonly string[];
+  readonly source: AdaptiveSource;
+  readonly seed: number;
+}
+
+/**
+ * The adaptive session builder: draw a unit by weakness, then materialize it as a
+ * character group or as a word that contains it.
+ */
+export function buildAdaptiveDrill(spec: AdaptiveDrillSpec): Drill {
+  const rng = createRng(spec.seed);
+  const words = spec.words ?? [];
+  const index = spec.shape === 'words' ? buildWordIndex(words) : new Map<string, number[]>();
+  // Only units the materializer can actually produce are worth drawing.
+  const available = spec.shape === 'words' ? new Set(index.keys()) : undefined;
+  const pool = buildCandidates(spec.source, available);
+  if (pool.length === 0) {
+    throw new Error('no units are available to drill');
+  }
+
+  const context: MaterializeContext = {
+    shape: spec.shape,
+    charsets: spec.charsets,
+    words,
+    index,
+    rng,
+  };
+  const groups: string[] = [];
+  const uses = new Map<string, number>();
+  const target = Math.max(1, Math.floor(spec.targetChars));
+  const maxGroups = target + 100;
+  let chars = 0;
+  let previousUnit: string | undefined;
+  let previousText: string | undefined;
+
+  while (chars < target && groups.length < maxGroups) {
+    const candidate = sampleCandidate(pool, rng, {
+      ...(previousUnit === undefined ? {} : { avoid: previousUnit }),
+      uses,
+    });
+    const text = materializeUnit(candidate.unit, context, previousText);
+    if (text.length === 0) {
+      break;
+    }
+    groups.push(text);
+    chars += text.length;
+    uses.set(candidate.unit, (uses.get(candidate.unit) ?? 0) + 1);
+    previousUnit = candidate.unit;
+    previousText = text;
+  }
+
+  return { groups, text: groups.join(' ') };
 }

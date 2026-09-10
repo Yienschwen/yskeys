@@ -35,10 +35,11 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 ### F1 — Session generation
 - **Trigger**: page load with no active session, or "Again" after a result, or `Esc`.
 - **Normal**: build the whole session up front (default ≈ 150 non-space characters) from the enabled
-  charsets, in one of two shapes: **words** drawn from the list the user imported, or **uniform
-  character groups**. Words are used when the shape setting asks for it, a list is imported, and every
-  enabled charset is a letter set; otherwise the character drill runs. Weights come from history; with
-  no history, use the cold-start prior. Show the target with the current position highlighted.
+  charsets, in one of two shapes: **words** drawn from the list the user imported, or **character
+  groups**. Words are used when the shape setting asks for it, a list is imported, and every enabled
+  charset is a letter set; otherwise the character drill runs. In `adaptive` mode (the default) what
+  gets practised is chosen by the weights in F5 — in the words shape that means drawing units and then
+  finding words that contain them. Show the target with the current position highlighted.
 - **Exceptions**: only one charset enabled → fine. Zero charsets enabled → block start and prompt
   to enable one. History exists but every unit has 0 attempts → fall back to cold-start prior.
 
@@ -74,13 +75,32 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
   → prune the lowest-`attempts` trigrams first, then bigrams, and prompt an export.
 
 ### F5 — Adaptive weighting
-- **Trigger**: every session build (default mode `adaptive`).
-- **Normal**: `w(s) = max((1 - acc_smoothed(s))^2 × boost, 0.05)`, `boost = 2.5` when a unit has
-  fewer than 10 attempts. Sample 60% from the weakest 30% of units, 25% from the next tier, 15%
-  uniformly at random (anti-forgetting). No unit twice in a row.
-- **Exceptions**: no history → cold-start prior (home row → top row → bottom row → digits → shifted
-  → symbols). All units equally bad → degenerates to near-uniform, which is acceptable. `uniform`
-  mode is available as an A/B control and must stay working.
+- **Trigger**: every session build, in `adaptive` mode (the default). The mode control lives in the
+  History view: it is a control for checking whether the adaptive part helps, not a daily setting.
+- **Normal**: every enabled single character is a candidate, plus every **observed** bigram (676
+  unobserved ones would swamp the pool). Weight is
+  `max((1 - acc_smoothed)^2 × boost, 0.01)` with `boost = 2.5` under 10 attempts, and
+  `UNSEEN_WEIGHT = 0.16` for a unit that has never been typed — roughly a 60%-accuracy unit, because
+  reusing the display prior (0.9) would make the keys you have never touched the ones you practise
+  least. **85% of draws follow those weights, 15% are uniform**, no unit comes up twice in a row, and
+  a unit already drawn this session has its weight halved per prior use so one weak key cannot fill a
+  whole drill.
+- **Materialization**: in the **words** shape the drawn unit is resolved to a word *containing* it
+  (only units that some word can satisfy are candidates), which is the only way a rare key is ever
+  practised — 99 of EFF's 7776 words contain a `q`. In the **characters** shape the unit is emitted
+  alone 30% of the time and inside a 3–5 character group otherwise, with filler only ever added
+  before or after it so a bigram stays contiguous.
+- **Exceptions**: no history at all → cold-start prior (home row → top row → bottom row → number row,
+  shifted characters halved), single characters only. No unit can be materialized (an empty word list,
+  say) → the plain character generator runs. `uniform` mode skips weighting entirely and must keep
+  working: it is the only way to tell whether the adaptive part does anything.
+
+> Why there are no tiers. The first version of this spec drew 60% from "the weakest 30%", 25% from a
+> middle tier and 15% uniformly. That structure caps the ratio between a bad unit and a good one at
+> about 2x however the weights behave, which makes acceptance #6 unreachable — the weights are
+> supposed to *be* the "how weak" signal. The same first version set the floor to 0.05, which lifted a
+> 99%-accuracy unit until it was only 4.6x rarer than a 50% one. Both were caught by writing the
+> acceptance test first.
 
 ### F6 — Accuracy definitions
 - **Trigger**: weighting (M3). The history tables deliberately show **raw** accuracy instead.
@@ -122,10 +142,11 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 ### F10 — Settings
 - **Trigger**: charset / length / mode controls in the header.
 - **Normal**: charsets = lowercase (default on), uppercase, digits, punctuation, programming symbols.
-  Length 15 / 30 (default) / 60 groups. Shape `words` (default) / `characters`; the words option is
-  disabled with a stated reason when no usable list is loaded, when the list has too few usable words,
-  or when a non-letter charset is enabled. Mode `adaptive` (default) / `uniform`; that control arrives
-  with M3. Changes apply to the **next** session, never mid-session.
+  Length 15 / 30 (default) / 60, meaning a target of about 150 non-space characters at the default.
+  Shape `words` (default) / `characters`; the words option is disabled with a stated reason when no
+  usable list is loaded, when the list has too few usable words, or when a non-letter charset is
+  enabled. Mode `adaptive` (default) / `uniform`, which lives in the **History view** rather than the
+  header. Changes apply to the **next** session, never mid-session.
 - **Exceptions**: turning off all charsets is prevented at the UI level. Settings persist alongside
   history and are included in the export.
 
@@ -209,7 +230,7 @@ yskeys/
    ├─ main.ts          # wiring: views, keyboard, session lifecycle
    ├─ config.ts        # all tunables (γ, α, boost, mix ratios, lengths, size guard)
    ├─ vite-env.d.ts    # Vite ambient types (asset imports)
-   ├─ core/            # pure, no DOM: charset, random, generator, wordlist, engine, metrics, layout (+ adaptive)
+   ├─ core/            # pure, no DOM: charset, random, generator, wordlist, engine, metrics, layout, adaptive
    ├─ store/           # schema (+validators), migrations, aggregate, persistence, transfer, wordlist
    ├─ ui/              # dom, format, stat, banner, chart, dialogs, settings-controls,
    │                   # typing-view, result-view, history-view, styles.css
@@ -225,8 +246,9 @@ Data flow: `charset + aggregates → adaptive.weights → generator.buildSession
 3. After a 30-group session, `attempts` / `firstTryCorrect` deltas exactly match the keystrokes.
 4. Export → clear → import (Replace) round-trips to an identical store, field by field.
 5. Importing the same file twice in Merge mode exactly doubles counters and does not duplicate sessions.
-6. Given `a` at 50% and `b` at 99% (100 samples each), 1000 samples put `a` ≥ 5× more often than `b`;
-   and a 100%-accuracy unit still appears over a long session (weight floor works).
+6. With a 26-letter pool where `a` is at 50% and `b` at 99% (100 attempts each), 10,000 draws with
+   the in-session decay off put `a` ≥ 5× more often than `b`; and every unit, including a
+   100%-accuracy one, is drawn at least half its guaranteed exploration share (0.15 / pool size).
 7. History survives reload; broken/blocked `localStorage` degrades gracefully with a banner.
 8. `pnpm test` green, no console errors, and §4 non-goals are genuinely absent.
 

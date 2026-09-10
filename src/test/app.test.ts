@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { bootstrap } from '../main';
 import type { AppHandle } from '../main';
 import { MemoryStorage, UNREADABLE_STORAGE } from './helpers';
+import type { Settings } from '../store/schema';
 
 /**
  * The only automated check of the interactive layer. It drives the real app
@@ -80,6 +81,16 @@ function viewButton(root: HTMLElement, container: string, text?: string): HTMLBu
   return found;
 }
 
+function segmentByText(root: HTMLElement, text: string): HTMLButtonElement {
+  const found = [...root.querySelectorAll('button.segment')].find(
+    (candidate) => candidate.textContent === text,
+  );
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new Error(`no segment labelled ${text}`);
+  }
+  return found;
+}
+
 afterEach(() => {
   app?.destroy();
   app = null;
@@ -89,9 +100,11 @@ afterEach(() => {
 describe('app wiring', () => {
   it('renders one span per character, in groups', () => {
     const root = mount();
-    expect(chars(root)).toHaveLength(179);
-    expect(root.querySelectorAll('.group')).toHaveLength(30);
-    expect(targetOf(root)).toHaveLength(179);
+    const drill = targetOf(root);
+    // Adaptive character drills vary in group length, so nothing here is a fixed count.
+    expect(drill.length).toBeGreaterThan(150);
+    expect(root.querySelectorAll('.group').length).toBeGreaterThan(20);
+    expect(chars(root)).toHaveLength(drill.length);
   });
 
   it('marks only the first character as current before typing', () => {
@@ -103,26 +116,25 @@ describe('app wiring', () => {
   it('expects a real space between groups, not a decorative gap', () => {
     const root = mount();
     const target = targetOf(root);
-    expect(target).toContain(' ');
+    const firstSpace = target.indexOf(' ');
+    expect(firstSpace).toBeGreaterThan(0);
 
-    // The first group plus the space that follows it.
-    for (const char of target.slice(0, 6)) {
+    for (const char of target.slice(0, firstSpace + 1)) {
       press(char);
     }
 
-    expect(app?.state().typed).toBe(target.slice(0, 6));
-    expect(classAt(root, 5)).toContain('ch--space');
-    expect(classAt(root, 5)).toContain('is-ok');
+    expect(app?.state().typed).toBe(target.slice(0, firstSpace + 1));
+    expect(classAt(root, firstSpace)).toContain('ch--space');
+    expect(classAt(root, firstSpace)).toContain('is-ok');
   });
 
-  it('counts a stray space inside a group as a miss like any other key', () => {
+  it('counts a stray space as a miss when a character was expected', () => {
     const root = mount();
-    const target = targetOf(root);
-    press(target.charAt(0));
+    // The first expected character is never a space, whatever the group lengths are.
     press(' ');
 
-    expect(classAt(root, 1)).toContain('is-bad');
-    expect(app?.state().firstAttempt[1]).toBe(' ');
+    expect(classAt(root, 0)).toContain('is-bad');
+    expect(app?.state().firstAttempt[0]).toBe(' ');
   });
 
   it('marks correct characters and advances the cursor', () => {
@@ -239,7 +251,7 @@ describe('app wiring', () => {
     viewButton(root, '.result', 'Again').click();
     expect(app?.state().typed).toBe('');
     expect(app?.state().status).toBe('ready');
-    expect(root.querySelectorAll('.ch')).toHaveLength(179);
+    expect(root.querySelectorAll('.ch').length).toBeGreaterThan(150);
     expect(root.textContent).not.toBe(before);
   });
 });
@@ -263,12 +275,14 @@ describe('persistence, settings and history', () => {
     app = bootstrap(reopened, { seed: 9, storage });
 
     expect(app.store().aggregates.totalSessions).toBe(1);
-    expect(app.store().sessions[0]?.totalChars).toBe(179);
+    const summary = app.store().sessions[0];
+    expect(summary?.totalChars).toBeGreaterThan(150);
 
-    // The 29 spaces between the 30 groups are targets, and they are recorded.
-    expect(app.store().aggregates.unigrams[' ']?.attempts).toBe(29);
-    expect(app.store().aggregates.unigrams[' ']?.firstTryCorrect).toBe(29);
-    expect(app.store().aggregates.byFinger['thumb']?.attempts).toBe(29);
+    // The spaces between groups are targets, and they are recorded under the thumb.
+    const spaces = app.store().aggregates.unigrams[' '];
+    expect(spaces?.attempts).toBeGreaterThan(10);
+    expect(spaces?.firstTryCorrect).toBe(spaces?.attempts);
+    expect(app.store().aggregates.byFinger['thumb']?.attempts).toBe(spaces?.attempts);
   });
 
   it('does not save a session that was abandoned with Escape', () => {
@@ -284,9 +298,9 @@ describe('persistence, settings and history', () => {
     app?.changeSettings({ charsets: ['digits'], groupCount: 15 });
     app?.newSession();
 
-    const drill = targetOf(root);
-    expect(drill).toHaveLength(89);
-    expect([...drill].every((char) => char === ' ' || '0123456789'.includes(char))).toBe(true);
+    const typed = targetOf(root).replaceAll(' ', '');
+    expect(typed.length).toBeGreaterThanOrEqual(75);
+    expect([...typed].every((char) => '0123456789'.includes(char))).toBe(true);
     expect(app?.store().settings).toEqual({ charsets: ['digits'], groupCount: 15 });
   });
 
@@ -322,7 +336,7 @@ describe('persistence, settings and history', () => {
     const imported = app?.importText(text, 'replace');
     expect(imported?.ok).toBe(true);
     expect(app?.store().aggregates.totalSessions).toBe(1);
-    expect(app?.store().sessions[0]?.totalChars).toBe(179);
+    expect(app?.store().sessions[0]?.totalChars).toBeGreaterThan(150);
   });
 
   it('restores history and settings when a replace is undone', () => {
@@ -337,6 +351,7 @@ describe('persistence, settings and history', () => {
       charsets: ['lowercase'],
       groupCount: 30,
       shape: 'words',
+      mode: 'adaptive',
     });
 
     expect(app?.undoReplace()).toBe(true);
@@ -408,6 +423,7 @@ describe('persistence, settings and history', () => {
       charsets: ['lowercase'],
       groupCount: 30,
       shape: 'words',
+      mode: 'adaptive',
     });
   });
 });
@@ -470,7 +486,7 @@ describe('word list and drill shape', () => {
     app?.newSession();
 
     const drill = targetOf(root);
-    expect(drill).toHaveLength(179);
+    expect(drill.replaceAll(' ', '').length).toBeGreaterThanOrEqual(150);
     // 150 random characters from 36 symbols with no digit at all is not a thing.
     expect(drill).toMatch(/[0-9]/);
   });
@@ -478,7 +494,7 @@ describe('word list and drill shape', () => {
   it('goes back to random characters when the shape is set to uniform', () => {
     const { root } = mountWithStorage();
     app?.importWordListText(LIST_TEXT, 'test.txt');
-    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform' });
+    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform', mode: 'uniform' });
     app?.newSession();
 
     const drill = targetOf(root);
@@ -493,7 +509,9 @@ describe('word list and drill shape', () => {
 
     expect(app?.wordList()).toBeNull();
     app?.newSession();
-    expect(targetOf(root)).toHaveLength(179);
+    // Groups come from the character generator now, not from the list.
+    const groups = targetOf(root).split(' ');
+    expect(groups.some((group) => !LIST_WORDS.includes(group))).toBe(true);
   });
 
   it('keeps the word list when history and settings are cleared', () => {
@@ -539,9 +557,86 @@ describe('word list and drill shape', () => {
     finishDrill(root);
     expect(app?.store().sessions[0]?.shape).toBe('words');
 
-    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform' });
+    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform', mode: 'uniform' });
     app?.newSession();
     finishDrill(root);
     expect(app?.store().sessions[0]?.shape).toBe('uniform');
+  });
+});
+
+describe('adaptive weighting', () => {
+  it('records the weighting mode that produced the session', () => {
+    const { root } = mountWithStorage();
+    finishDrill(root);
+    expect(app?.store().sessions[0]?.mode).toBe('adaptive');
+
+    app?.changeSettings({ ...(app?.settings() as Settings), mode: 'uniform' });
+    app?.newSession();
+    finishDrill(root);
+    expect(app?.store().sessions[0]?.mode).toBe('uniform');
+  });
+
+  it('switches the weighting mode from the history view', () => {
+    const { root } = mountWithStorage();
+    app?.showHistory();
+    segmentByText(root, 'Uniform').click();
+
+    expect(app?.settings().mode).toBe('uniform');
+
+    app?.newSession();
+    finishDrill(root);
+    expect(app?.store().sessions[0]?.mode).toBe('uniform');
+  });
+
+  it('drills the unit the history says is weak', () => {
+    const { root } = mountWithStorage();
+    // Seeding through import keeps this honest: it is the real store that drives the drill.
+    const seeded = {
+      kind: 'yskeys-export',
+      schemaVersion: 1,
+      exportedAt: 1,
+      app: { version: '0' },
+      settings: { charsets: ['lowercase'], groupCount: 30, shape: 'uniform', mode: 'adaptive' },
+      aggregates: {
+        schemaVersion: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        totalSessions: 1,
+        totalKeystrokes: 200,
+        unigrams: {
+          a: { attempts: 100, firstTryCorrect: 50, wrongTyped: {} },
+          b: { attempts: 100, firstTryCorrect: 99, wrongTyped: {} },
+        },
+        bigrams: {},
+        trigrams: {},
+        byFinger: {},
+        byHand: {},
+        byShifted: {},
+        byKind: {},
+      },
+      sessions: [],
+    };
+    expect(app?.importText(JSON.stringify(seeded), 'replace').ok).toBe(true);
+    app?.newSession();
+
+    const text = targetOf(root).replaceAll(' ', '');
+    const weak = [...text].filter((char) => char === 'a').length;
+    const strong = [...text].filter((char) => char === 'b').length;
+
+    expect(weak).toBeGreaterThan(strong);
+  });
+
+  it('still runs the plain character drill in uniform mode', () => {
+    const { root } = mountWithStorage();
+    app?.changeSettings({
+      charsets: ['lowercase'],
+      groupCount: 30,
+      shape: 'uniform',
+      mode: 'uniform',
+    });
+    app?.newSession();
+
+    // Every group is exactly five characters in the uniform shape, plus 29 spaces.
+    expect(targetOf(root)).toHaveLength(179);
   });
 });
