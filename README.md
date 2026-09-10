@@ -32,11 +32,21 @@ shells. It lives at `~/Library/pnpm/bin/pnpm`.
 
 Live at <https://yienschwen.github.io/yskeys/> after the first successful workflow run.
 
-1. Push to `main` — the `Deploy to GitHub Pages` workflow typechecks, tests, builds and deploys.
-2. Pages is enabled by the workflow itself (`configure-pages` with `enablement: true`). If that step
-   fails, enable it by hand: **Settings → Pages → Build and deployment → Source = GitHub Actions**,
-   then re-run the workflow. Pushing alone is not enough in that case.
-3. The first run takes a minute; the site appears at the URL above once the `deploy` job is green.
+**One-time setup, and it must be done by a human:**
+
+**Settings → Pages → Build and deployment → Source = `GitHub Actions`.**
+
+The workflow cannot do this for you. `GITHUB_TOKEN` is not allowed to *create* a Pages site —
+`POST /repos/{owner}/{repo}/pages` returns `Resource not accessible by integration`, which is why
+`configure-pages` is called without `enablement: true`. Do not add that input back; it fails on a
+repository that has never had Pages enabled.
+
+Then:
+
+1. Push to `main`, or click **Actions → Deploy to GitHub Pages → Run workflow**
+   (`workflow_dispatch` is enabled, so enabling Pages does not require an extra commit).
+2. Check the deployed *assets*, not just the root page — if the base path and the repository name
+   disagree, `/yskeys/` still returns 200 while every `.js` and `.css` request 404s.
 
 The base path `/yskeys/` is set in `vite.config.ts` and **must match the repository name**,
 otherwise every built asset 404s on the Pages subpath.

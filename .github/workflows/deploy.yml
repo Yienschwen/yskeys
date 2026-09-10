@@ -34,12 +34,11 @@ jobs:
       - run: pnpm test
       - run: pnpm run build
 
-      # enablement: true turns Pages on if it was never enabled, so the first push
-      # deploys without a manual trip to Settings. If it fails, enable it by hand:
-      # Settings -> Pages -> Source = GitHub Actions.
+      # Do NOT add `enablement: true` here. Creating a Pages site requires a user
+      # token; GITHUB_TOKEN answers POST /repos/{owner}/{repo}/pages with
+      # "Resource not accessible by integration" and the step fails. Pages must be
+      # enabled once by a human: Settings -> Pages -> Source = GitHub Actions.
       - uses: actions/configure-pages@v6
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
