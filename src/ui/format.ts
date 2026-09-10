@@ -5,6 +5,13 @@
 
 export const DASH = '—';
 
+/** Visible stand-in for the space character in tables, where a blank cell is a lie. */
+export const SPACE_GLYPH = '␣';
+
+export function displayUnit(unit: string): string {
+  return unit.replaceAll(' ', SPACE_GLYPH);
+}
+
 export function formatPercent(value: number | null): string {
   return value === null ? DASH : `${(value * 100).toFixed(1)}%`;
 }

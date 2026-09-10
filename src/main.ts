@@ -218,7 +218,7 @@ export function bootstrap(root: HTMLElement, options: AppOptions = {}): AppHandl
     sessionWallStart = now();
     lastJudgement = null;
     mode = 'practice';
-    view = createTypingView(drill, GROUP_SIZE);
+    view = createTypingView(drill);
     main.replaceChildren(practiceSection(view.element));
     view.render(currentSession(), null);
     refresh(currentSession());

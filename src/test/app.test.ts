@@ -89,15 +89,40 @@ afterEach(() => {
 describe('app wiring', () => {
   it('renders one span per character, in groups', () => {
     const root = mount();
-    expect(chars(root)).toHaveLength(150);
+    expect(chars(root)).toHaveLength(179);
     expect(root.querySelectorAll('.group')).toHaveLength(30);
-    expect(targetOf(root)).toHaveLength(150);
+    expect(targetOf(root)).toHaveLength(179);
   });
 
   it('marks only the first character as current before typing', () => {
     const root = mount();
     expect(classAt(root, 0)).toContain('is-current');
     expect(classAt(root, 1)).not.toContain('is-current');
+  });
+
+  it('expects a real space between groups, not a decorative gap', () => {
+    const root = mount();
+    const target = targetOf(root);
+    expect(target).toContain(' ');
+
+    // The first group plus the space that follows it.
+    for (const char of target.slice(0, 6)) {
+      press(char);
+    }
+
+    expect(app?.state().typed).toBe(target.slice(0, 6));
+    expect(classAt(root, 5)).toContain('ch--space');
+    expect(classAt(root, 5)).toContain('is-ok');
+  });
+
+  it('counts a stray space inside a group as a miss like any other key', () => {
+    const root = mount();
+    const target = targetOf(root);
+    press(target.charAt(0));
+    press(' ');
+
+    expect(classAt(root, 1)).toContain('is-bad');
+    expect(app?.state().firstAttempt[1]).toBe(' ');
   });
 
   it('marks correct characters and advances the cursor', () => {
@@ -214,7 +239,7 @@ describe('app wiring', () => {
     viewButton(root, '.result', 'Again').click();
     expect(app?.state().typed).toBe('');
     expect(app?.state().status).toBe('ready');
-    expect(root.querySelectorAll('.ch')).toHaveLength(150);
+    expect(root.querySelectorAll('.ch')).toHaveLength(179);
     expect(root.textContent).not.toBe(before);
   });
 });
@@ -238,7 +263,12 @@ describe('persistence, settings and history', () => {
     app = bootstrap(reopened, { seed: 9, storage });
 
     expect(app.store().aggregates.totalSessions).toBe(1);
-    expect(app.store().sessions[0]?.totalChars).toBe(150);
+    expect(app.store().sessions[0]?.totalChars).toBe(179);
+
+    // The 29 spaces between the 30 groups are targets, and they are recorded.
+    expect(app.store().aggregates.unigrams[' ']?.attempts).toBe(29);
+    expect(app.store().aggregates.unigrams[' ']?.firstTryCorrect).toBe(29);
+    expect(app.store().aggregates.byFinger['thumb']?.attempts).toBe(29);
   });
 
   it('does not save a session that was abandoned with Escape', () => {
@@ -255,8 +285,8 @@ describe('persistence, settings and history', () => {
     app?.newSession();
 
     const drill = targetOf(root);
-    expect(drill).toHaveLength(75);
-    expect([...drill].every((char) => '0123456789'.includes(char))).toBe(true);
+    expect(drill).toHaveLength(89);
+    expect([...drill].every((char) => char === ' ' || '0123456789'.includes(char))).toBe(true);
     expect(app?.store().settings).toEqual({ charsets: ['digits'], groupCount: 15 });
   });
 
@@ -292,7 +322,7 @@ describe('persistence, settings and history', () => {
     const imported = app?.importText(text, 'replace');
     expect(imported?.ok).toBe(true);
     expect(app?.store().aggregates.totalSessions).toBe(1);
-    expect(app?.store().sessions[0]?.totalChars).toBe(150);
+    expect(app?.store().sessions[0]?.totalChars).toBe(179);
   });
 
   it('restores history and settings when a replace is undone', () => {

@@ -17,20 +17,33 @@ describe('buildUniformDrill', () => {
     for (const group of drill.groups) {
       expect(group).toHaveLength(5);
     }
-    expect(drill.text).toHaveLength(150);
-    expect(drill.text).toBe(drill.groups.join(''));
+    expect(drill.text).toHaveLength(179);
+    expect(drill.text).toBe(drill.groups.join(' '));
   });
 
   it('draws only from the enabled charsets', () => {
     const drill = buildUniformDrill({ ...baseSpec, charsets: ['digits'] });
-    expect([...drill.text].every((char) => '0123456789'.includes(char))).toBe(true);
+    expect([...drill.text].every((char) => char === ' ' || '0123456789'.includes(char))).toBe(true);
   });
 
-  it('never repeats a character back to back', () => {
+  it('never repeats a character back to back inside a group', () => {
     const drill = buildUniformDrill(baseSpec);
-    for (let index = 1; index < drill.text.length; index += 1) {
-      expect(drill.text.charAt(index)).not.toBe(drill.text.charAt(index - 1));
+    for (const group of drill.groups) {
+      for (let index = 1; index < group.length; index += 1) {
+        expect(group.charAt(index)).not.toBe(group.charAt(index - 1));
+      }
     }
+  });
+
+  it('separates groups with exactly one real space', () => {
+    const drill = buildUniformDrill(baseSpec);
+    expect(drill.groups).toHaveLength(30);
+    expect(drill.text).toBe(drill.groups.join(' '));
+    expect(drill.text).not.toContain('  ');
+    expect(drill.text.startsWith(' ')).toBe(false);
+    expect(drill.text.endsWith(' ')).toBe(false);
+    // 30 groups of 5 plus the 29 spaces between them.
+    expect(drill.text.length).toBe(30 * 5 + 29);
   });
 
   it('holds the no-repeat rule even for the smallest charset', () => {
@@ -39,8 +52,10 @@ describe('buildUniformDrill', () => {
       charsets: ['punctuation'],
       groupCount: 40,
     });
-    for (let index = 1; index < drill.text.length; index += 1) {
-      expect(drill.text.charAt(index)).not.toBe(drill.text.charAt(index - 1));
+    for (const group of drill.groups) {
+      for (let index = 1; index < group.length; index += 1) {
+        expect(group.charAt(index)).not.toBe(group.charAt(index - 1));
+      }
     }
   });
 
@@ -62,7 +77,7 @@ describe('buildUniformDrill', () => {
       groupSize: 5,
       seed: 5,
     });
-    expect(new Set([...drill.text]).size).toBe(pool.length);
+    expect(new Set([...drill.text].filter((char) => char !== ' ')).size).toBe(pool.length);
   });
 
   it('rejects an empty charset selection', () => {

@@ -61,6 +61,14 @@ describe('typing', () => {
     expect(charStateAt(state, 0)).toBe('bad');
   });
 
+  it('treats a space as an ordinary target character', () => {
+    const state = play(createSession({ target: 'ab cd', groupSize: 2 }), ['a', 'b', ' '], 1000);
+
+    expect(state.typed).toBe('ab ');
+    expect(charStateAt(state, 2)).toBe('ok');
+    expect(cursorIndex(state)).toBe(3);
+  });
+
   it('ignores multi-character keys such as Shift', () => {
     const ready = session();
     const result = applyEvent(ready, { type: 'key', key: 'Shift', at: 1000 });

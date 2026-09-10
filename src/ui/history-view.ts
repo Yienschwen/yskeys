@@ -4,7 +4,7 @@ import type { Metric, SortDirection, UnitRow, UnitSortKey } from '../core/metric
 import type { Store } from '../store/schema';
 import { createCpmChart } from './chart';
 import { h } from './dom';
-import { formatCount, formatPercent, formatSpeed } from './format';
+import { formatCount, displayUnit, formatPercent, formatSpeed } from './format';
 import { createStatRow } from './stat';
 
 /**
@@ -203,7 +203,12 @@ function createUnitTable(
 function createRow(row: UnitRow): HTMLElement {
   const tr = h('tr');
   const unitCell = h('td');
-  unitCell.append(h('span', 'table__unit', row.unit));
+  const label = displayUnit(row.unit);
+  const unit = h('span', 'table__unit', label);
+  if (label !== row.unit) {
+    unit.title = 'contains a space';
+  }
+  unitCell.append(unit);
   if (row.attempts < LOW_SAMPLE_ATTEMPTS) {
     const flag = h('span', 'tag tag--warning', 'low sample');
     flag.title = `fewer than ${String(LOW_SAMPLE_ATTEMPTS)} attempts`;
@@ -248,7 +253,7 @@ function createBreakdown(store: Store): HTMLElement {
     for (const row of sortUnitRows(unitRows(map), 'errors', 'desc')) {
       const tr = h('tr');
       tr.append(h('td', '', groupName));
-      tr.append(h('td', 'table__unit', row.unit));
+      tr.append(h('td', 'table__unit', displayUnit(row.unit)));
       tr.append(h('td', 'is-numeric', formatPercent(row.accuracy)));
       tr.append(h('td', 'is-numeric', formatCount(row.errors)));
       tr.append(h('td', 'is-numeric', formatCount(row.attempts)));

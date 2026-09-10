@@ -17,10 +17,11 @@ export type FingerId =
   | 'r-index'
   | 'r-middle'
   | 'r-ring'
-  | 'r-pinky';
+  | 'r-pinky'
+  | 'thumb';
 
 export type Hand = 'left' | 'right';
-export type CharKind = 'letter' | 'digit' | 'punctuation' | 'symbol';
+export type CharKind = 'letter' | 'digit' | 'punctuation' | 'symbol' | 'space';
 
 export interface KeyInfo {
   readonly char: string;
@@ -100,6 +101,22 @@ function kindOf(char: string): CharKind {
   throw new Error(`no charset contains ${JSON.stringify(char)}`);
 }
 
+/**
+ * The space bar. It is not part of any charset — those are the selectable drill
+ * characters — but it separates words in every drill, so it is a real target and gets
+ * a real record. `hand` is a convention: the space bar is pressed by a thumb, and the
+ * right thumb is the common choice, but the finger table is where that belongs.
+ */
+const SPACE_KEY: KeyInfo = {
+  char: ' ',
+  row: 5,
+  col: 4,
+  hand: 'right',
+  finger: 'thumb',
+  shifted: false,
+  kind: 'space',
+};
+
 function buildLayout(): ReadonlyMap<string, KeyInfo> {
   const layout = new Map<string, KeyInfo>();
 
@@ -136,10 +153,12 @@ function buildLayout(): ReadonlyMap<string, KeyInfo> {
     }
   });
 
+  layout.set(' ', SPACE_KEY);
+
   return layout;
 }
 
-/** All 94 printable non-space ASCII characters, keyed by the character itself. */
+/** All 95 keys: the 94 printable non-space characters plus the space bar. */
 export const KEY_LAYOUT: ReadonlyMap<string, KeyInfo> = buildLayout();
 
 export function keyInfo(char: string): KeyInfo | null {

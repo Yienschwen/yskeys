@@ -1,6 +1,6 @@
 import type { WeakUnit } from '../core/metrics';
 import { h } from './dom';
-import { formatCount, formatDuration, formatMs, formatPercent, formatSpeed } from './format';
+import { displayUnit, formatCount, formatDuration, formatMs, formatPercent, formatSpeed } from './format';
 import { createStatRow } from './stat';
 
 /** The end-of-session summary (PROJECT.md F3). */
@@ -81,7 +81,12 @@ function createWeakTable(units: readonly WeakUnit[]): HTMLElement {
   for (const unit of units) {
     const row = h('tr');
     const unitCell = h('td');
-    unitCell.append(h('span', 'table__unit', unit.unit));
+    const label = displayUnit(unit.unit);
+    const unitLabel = h('span', 'table__unit', label);
+    if (label !== unit.unit) {
+      unitLabel.title = 'contains a space';
+    }
+    unitCell.append(unitLabel);
     if (unit.kind === 'bi') {
       unitCell.append(h('span', 'tag', 'pair'));
     }

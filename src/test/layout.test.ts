@@ -11,13 +11,21 @@ describe('key layout', () => {
     }
   });
 
-  it('covers exactly the 94 printable non-space characters', () => {
-    expect(KEY_LAYOUT.size).toBe(94);
+  it('knows every charset character plus the space bar', () => {
+    expect(KEY_LAYOUT.size).toBe(95);
   });
 
-  it('records every key in both its plain and shifted form', () => {
+  it('gives the space bar its own key, finger and kind', () => {
+    expect(keyInfo(' ')?.finger).toBe('thumb');
+    expect(keyInfo(' ')?.kind).toBe('space');
+    expect(keyInfo(' ')?.shifted).toBe(false);
+    expect(keyInfo(' ')?.row).toBe(5);
+  });
+
+  it('records every key in both its plain and shifted form, plus the space bar', () => {
     const values = [...KEY_LAYOUT.values()];
-    expect(values.filter((key) => !key.shifted)).toHaveLength(47);
+    // 47 physical keys, each in a plain and a shifted form, plus space (unshifted only).
+    expect(values.filter((key) => !key.shifted)).toHaveLength(48);
     expect(values.filter((key) => key.shifted)).toHaveLength(47);
   });
 
@@ -61,14 +69,14 @@ describe('key layout', () => {
   it('places rows and columns inside the keyboard', () => {
     for (const key of KEY_LAYOUT.values()) {
       expect(key.row, key.char).toBeGreaterThanOrEqual(1);
-      expect(key.row, key.char).toBeLessThanOrEqual(4);
+      // Row 5 is the space bar, below the four character rows.
+      expect(key.row, key.char).toBeLessThanOrEqual(5);
       expect(key.col, key.char).toBeGreaterThanOrEqual(0);
       expect(key.col, key.char).toBeLessThanOrEqual(12);
     }
   });
 
   it('returns null for characters that are not on the keyboard', () => {
-    expect(keyInfo(' ')).toBeNull();
     expect(keyInfo('中')).toBeNull();
     expect(keyInfo('')).toBeNull();
   });

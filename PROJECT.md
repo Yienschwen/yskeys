@@ -34,7 +34,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 
 ### F1 — Session generation
 - **Trigger**: page load with no active session, or "Again" after a result, or `Esc`.
-- **Normal**: build the whole session up front (default 30 groups × 5 chars ≈ 150 chars) from the
+- **Normal**: build the whole session up front (default 30 groups × 5 chars ≈ 150 non-space
+  characters) from the
   enabled charsets. Weights come from history (§5); with no history, use the cold-start prior.
   Show the target string with the current position highlighted.
 - **Exceptions**: only one charset enabled → fine. Zero charsets enabled → block start and prompt
@@ -44,7 +45,8 @@ Each feature lists **Trigger** (when it fires), **Normal** (expected outcome), *
 - **Trigger**: `keydown` while the practice view is focused.
 - **Normal**: accept keys where `event.key.length === 1`; compare to `target[i]`. Correct → advance
   and mark correct. Wrong → advance anyway, mark red, record the miss against the **first** attempt
-  at that position. `Backspace` corrects the display only; it never creates a new sample.
+  at that position. `Backspace` corrects the display only; it never creates a new sample. The space
+  between groups is an ordinary character here: judged, counted and recorded like any other key.
 - **Exceptions**: `Esc` aborts/restarts; `Enter` starts the next session from the result view.
   `Tab` and `Shift+Tab` are **never intercepted** (keyboard navigation must always work). Unknown or
   modifier keys and IME composition are ignored, not counted. Window blur → pause timer and hide the target.
@@ -172,6 +174,10 @@ The authoritative shapes live in `src/store/schema.ts`; this is only the summary
 - Recorded dimensions: `unigrams`, `bigrams`, `trigrams`, `byFinger`, `byHand`, `byShifted`, `byKind`.
   Every dimension counts first-try attempts only, and keeps a per-unit confusion map of what was
   actually typed.
+- **Groups are separated by a real space character, which is a target.** It is typed like any other
+  key, recorded as a unigram, and attributed to `byFinger['thumb']` and `byKind['space']`. A drill of
+  30 groups therefore has 179 characters, not 150. Space is deliberately **not** one of the five
+  selectable charsets: it is never optional, it is the separator.
 - Trigrams are all accumulated and persisted; ones below three attempts are only hidden from the UI.
   The earlier "persist only ≥ 3 attempts" rule was dropped because it reset sub-threshold counts on
   every write, so a trigram seen once per session could never accumulate.

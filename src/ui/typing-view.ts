@@ -4,8 +4,13 @@ import type { Drill } from '../core/generator';
 import { h } from './dom';
 
 /**
- * Renders one drill. Every character is a fixed-width span whose class changes
- * in place, so no state change can reflow the line (DESIGN.md §2.3).
+ * Renders one drill. Every character gets a fixed-width span whose class changes in
+ * place, so no state change can reflow the line (DESIGN.md §2.3).
+ *
+ * Groups are separated by a real space character, not by decoration: the space is a
+ * target the user has to type, and the span for it draws a low bar because an empty
+ * box would be invisible. Groups are variable length, so the active group is found by
+ * range rather than by dividing the cursor by a fixed size.
  */
 
 const STATE_CLASS: Record<CharState, string> = {
@@ -23,7 +28,7 @@ export interface TypingView {
   render(state: SessionState, judgement: Judgement | null): void;
 }
 
-export function createTypingView(drill: Drill, groupSize: number): TypingView {
+export function createTypingView(drill: Drill): TypingView {
   viewCounter += 1;
   const statusId = `drill-status-${String(viewCounter)}`;
 
@@ -32,7 +37,7 @@ export function createTypingView(drill: Drill, groupSize: number): TypingView {
   drillElement.setAttribute('role', 'application');
   drillElement.setAttribute(
     'aria-label',
-    'Typing drill. Type the characters shown, in order. Escape starts a new drill.',
+    'Typing drill. Type the characters shown, including the spaces between the groups. Escape starts a new drill.',
   );
   drillElement.tabIndex = 0;
 
@@ -42,18 +47,36 @@ export function createTypingView(drill: Drill, groupSize: number): TypingView {
   drillElement.setAttribute('aria-describedby', statusId);
 
   const charElements: HTMLElement[] = [];
+  const spaceFlags: boolean[] = [];
   const groupElements: HTMLElement[] = [];
+  const groupRanges: Array<{ start: number; end: number }> = [];
 
-  for (const group of drill.groups) {
+  let offset = 0;
+  const lastGroup = drill.groups.length - 1;
+
+  drill.groups.forEach((word, index) => {
+    const start = offset;
     const groupElement = h('span', 'group');
-    for (const char of group) {
+    for (const char of word) {
       const charElement = h('span', 'ch', char);
       charElements.push(charElement);
+      spaceFlags.push(false);
       groupElement.append(charElement);
+      offset += 1;
     }
     groupElements.push(groupElement);
     drillElement.append(groupElement);
-  }
+
+    if (index < lastGroup) {
+      const spaceElement = h('span', 'ch ch--space', ' ');
+      charElements.push(spaceElement);
+      spaceFlags.push(true);
+      drillElement.append(spaceElement);
+      offset += 1;
+    }
+
+    groupRanges.push({ start, end: offset });
+  });
 
   element.append(drillElement, status);
 
@@ -61,6 +84,16 @@ export function createTypingView(drill: Drill, groupSize: number): TypingView {
   let previousCurrent: boolean[] = [];
   let previousPending = false;
   let previousGroupKey = '';
+
+  function groupIndexFor(cursor: number): number {
+    for (let index = 0; index < groupRanges.length; index += 1) {
+      const range = groupRanges[index];
+      if (range !== undefined && cursor < range.end) {
+        return index;
+      }
+    }
+    return Math.max(0, groupRanges.length - 1);
+  }
 
   function render(state: SessionState, judgement: Judgement | null): void {
     const cursor = cursorIndex(state);
@@ -77,13 +110,18 @@ export function createTypingView(drill: Drill, groupSize: number): TypingView {
       const charState = charStateAt(state, index);
       const isCurrent = index === cursor;
       if (forceAll || previousStates[index] !== charState || previousCurrent[index] !== isCurrent) {
-        charElement.className = classFor(charState, isCurrent, pending);
+        charElement.className = classFor(
+          charState,
+          isCurrent,
+          pending,
+          spaceFlags[index] === true,
+        );
         previousStates[index] = charState;
         previousCurrent[index] = isCurrent;
       }
     }
 
-    const activeGroup = Math.min(Math.floor(cursor / groupSize), groupElements.length - 1);
+    const activeGroup = groupIndexFor(cursor);
     const groupKey = `${String(activeGroup)}:${String(state.status === 'running')}`;
     if (groupKey !== previousGroupKey) {
       const running = state.status === 'running';
@@ -105,8 +143,16 @@ export function createTypingView(drill: Drill, groupSize: number): TypingView {
   return { element, drill: drillElement, render };
 }
 
-function classFor(state: CharState, isCurrent: boolean, pending: boolean): string {
+function classFor(
+  state: CharState,
+  isCurrent: boolean,
+  pending: boolean,
+  space: boolean,
+): string {
   const parts = ['ch'];
+  if (space) {
+    parts.push('ch--space');
+  }
   const stateClass = STATE_CLASS[state];
   if (stateClass) {
     parts.push(stateClass);

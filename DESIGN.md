@@ -154,9 +154,17 @@ tokens (`--bg`, `--text`, …) are the only thing components may reference. Dark
 Structural rules:
 - Every character is its own `<span>` with fixed `min-width: 0.62em` (mono advance) so **no state
   change can reflow the line**. `.is-bad` must not change font-weight or padding.
-- A drill **group** (5 chars) is a `<span class="group">`; `.group.is-active` gets `border-radius:
+- A drill **group** is a `<span class="group">`; `.group.is-active` gets `border-radius:
   var(--radius-sm)` and a `--surface` background; `.group.is-done` is dimmed with `opacity: 0.7`.
-- Group separator: `--space-2` gap plus a `·` in `--border-strong` for low-vision/forced-colors contexts.
+  Groups are **variable length** (5 characters today, whole words once the word generator lands), so
+  the active group is found by range, never by dividing the cursor by a fixed size.
+- **The separator between groups is a real space character, not decoration.** It is a target the user
+  types, and it is recorded like any other key (one unigram, attributed to the thumb). It renders as
+  `<span class="ch ch--space">` with a low bar drawn in `::after`, because an empty box would be
+  invisible and would invite the user to guess. The bar takes the same state colours as a character
+  (`--text` correct, `--error` missed, `--warning` fixed, `--accent` current).
+- There is **no flex gap in the drill**: the visual spacing between groups *is* that space character.
+  Horizontal breathing room comes only from the zero-width-safe `padding-inline` on `.group`.
 - Long sessions wrap at **group boundaries** only, so a group is never split across lines.
 - The drill area has `min-height: 3 lines` reserved so the page does not jump when the string wraps.
 

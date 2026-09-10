@@ -16,7 +16,11 @@ export interface SessionSpec {
 }
 
 export interface Drill {
-  /** Groups are the unit of display and of line wrapping (DESIGN.md §2.3). */
+  /**
+   * Groups are the unit of display and of line wrapping (DESIGN.md §2.3). They are
+   * separated by a real space in `text`, which is typed and counted like any other
+   * character — the gap between groups is not decoration.
+   */
   readonly groups: readonly string[];
   readonly text: string;
 }
@@ -47,7 +51,7 @@ export function buildUniformDrill(spec: SessionSpec): Drill {
     groups.push(group);
   }
 
-  return { groups, text: groups.join('') };
+  return { groups, text: groups.join(' ') };
 }
 
 /**
