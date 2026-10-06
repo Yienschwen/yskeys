@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SCHEMA_VERSION } from '../config';
 import { MIGRATIONS, migrateStore, peekVersion, runMigrations } from '../store/migrations';
 import type { Migration } from '../store/migrations';
-import { defaultStore } from '../store/schema';
+import { defaultStore, preferredNextKey, preferredSpaceDisplay } from '../store/schema';
 
 function asObject(raw: unknown): Record<string, unknown> {
   return typeof raw === 'object' && raw !== null ? { ...(raw as Record<string, unknown>) } : {};
@@ -117,8 +117,100 @@ describe('migrateStore', () => {
     expect(migrateStore(older, { 1: broken }, 2).ok).toBe(false);
   });
 
-  it('ships an empty migration table, because v1 is the first schema', () => {
-    expect(Object.keys(MIGRATIONS)).toHaveLength(0);
+  it('ships a migration for every version below the current one', () => {
+    for (let version = 1; version < SCHEMA_VERSION; version += 1) {
+      expect(MIGRATIONS[version], `no migration from v${String(version)}`).toBeTypeOf('function');
+    }
+    expect(MIGRATIONS[SCHEMA_VERSION]).toBeUndefined();
+  });
+
+  it('drops the n-gram dimensions when migrating a v1 payload', () => {
+    const v1 = {
+      schemaVersion: 1,
+      settings: { charsets: ['lowercase'], groupCount: 30, shape: 'uniform', mode: 'adaptive' },
+      aggregates: {
+        schemaVersion: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        totalSessions: 1,
+        totalKeystrokes: 5,
+        unigrams: { a: { attempts: 1, firstTryCorrect: 1, wrongTyped: {} } },
+        bigrams: { ab: { attempts: 1, firstTryCorrect: 1, wrongTyped: {} } },
+        trigrams: { abc: { attempts: 1, firstTryCorrect: 1, wrongTyped: {} } },
+        byFinger: {},
+        byHand: {},
+        byShifted: {},
+        byKind: {},
+      },
+      sessions: [],
+    };
+
+    const result = migrateStore(v1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.store.schemaVersion).toBe(SCHEMA_VERSION);
+    // The per-character history survives; the pairs and triples are gone.
+    expect(result.store.aggregates.unigrams['a']?.attempts).toBe(1);
+    expect(Object.keys(result.store.aggregates)).not.toContain('bigrams');
+    expect(Object.keys(result.store.aggregates)).not.toContain('trigrams');
+    // `uniform` was the v1 name for what v2 calls a character-group drill.
+    expect(result.store.settings.shape).toBe('patterns');
+  });
+
+  it('renames the shape on v1 session summaries too, not only in settings', () => {
+    // A v1 session recorded the shape that produced it, and `uniform` is not a v2 value:
+    // leaving it would make the whole payload fail validation and park a real history.
+    const v1Session = {
+      id: 's-1',
+      startedAt: 1000,
+      durationMs: 1200,
+      mode: 'adaptive',
+      shape: 'uniform',
+      charsets: ['lowercase'],
+      totalChars: 4,
+      attempts: 4,
+      firstTryCorrect: 3,
+      backspaces: 0,
+      cpm: 150,
+      wpm: 30,
+      medianIntervalMs: 200,
+      worstUnits: [{ unit: 'a', kind: 'uni', attempts: 2, errors: 1 }],
+    };
+    const v1 = {
+      ...defaultStore(1),
+      schemaVersion: 1,
+      settings: { charsets: ['lowercase'], groupCount: 30, shape: 'uniform' },
+      sessions: [v1Session],
+    };
+
+    const result = migrateStore(v1);
+    expect(result.ok, result.ok ? '' : result.reason).toBe(true);
+    if (result.ok) {
+      expect(result.store.sessions[0]?.shape).toBe('patterns');
+      // The rest of the summary survives untouched.
+      expect(result.store.sessions[0]?.totalChars).toBe(4);
+      expect(result.store.sessions[0]?.worstUnits).toEqual([
+        { unit: 'a', kind: 'uni', attempts: 2, errors: 1 },
+      ]);
+    }
+  });
+
+  it('reads a v1 payload with no space marker as the current default', () => {
+    const v1 = {
+      ...defaultStore(1),
+      schemaVersion: 1,
+      settings: { charsets: ['lowercase'], groupCount: 30, shape: 'uniform' },
+    };
+    const result = migrateStore(v1);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The field is absent from the file, so the code default applies.
+      expect(result.store.settings.spaceDisplay).toBeUndefined();
+      expect(preferredSpaceDisplay(result.store.settings)).toBe('bar');
+      expect(preferredNextKey(result.store.settings)).toBe(true);
+    }
   });
 
   it('peeks the version without trusting the payload', () => {

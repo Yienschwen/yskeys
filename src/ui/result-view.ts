@@ -84,12 +84,9 @@ function createWeakTable(units: readonly WeakUnit[]): HTMLElement {
     const label = displayUnit(unit.unit);
     const unitLabel = h('span', 'table__unit', label);
     if (label !== unit.unit) {
-      unitLabel.title = 'contains a space';
+      unitLabel.title = 'a separator or line break';
     }
     unitCell.append(unitLabel);
-    if (unit.kind === 'bi') {
-      unitCell.append(h('span', 'tag', 'pair'));
-    }
     row.append(unitCell);
     row.append(h('td', 'is-numeric', formatPercent(unit.accuracy)));
     row.append(h('td', 'is-numeric', formatCount(unit.errors)));

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Metric } from '../core/metrics';
 import {
+  METRIC_MAP_KEYS,
+  SPACE_DISPLAYS,
+  SPACE_DISPLAY_LABELS,
   createSessionId,
   defaultSettings,
   defaultStore,
@@ -13,6 +16,8 @@ import {
   isSessionSummary,
   isSettings,
   isWorstUnit,
+  preferredNextKey,
+  preferredSpaceDisplay,
 } from '../store/schema';
 
 /**
@@ -99,20 +104,41 @@ describe('isSettings', () => {
   });
 
   it('accepts a missing drill shape but not an unknown one', () => {
-    expect(isSettings({ charsets: ['lowercase'], groupCount: 30 })).toBe(true);
-    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'words' })).toBe(true);
-    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform' })).toBe(true);
+    for (const shape of ['words', 'text', 'patterns']) {
+      expect(isSettings({ charsets: ['lowercase'], groupCount: 30, shape })).toBe(true);
+    }
     expect(isSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'poetry' })).toBe(false);
+  });
+
+  it('accepts the space marker choices and rejects anything else', () => {
+    for (const spaceDisplay of SPACE_DISPLAYS) {
+      expect(
+        isSettings({ charsets: ['lowercase'], groupCount: 30, spaceDisplay }),
+        spaceDisplay,
+      ).toBe(true);
+    }
+    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, spaceDisplay: 'dots' })).toBe(false);
+    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, nextKey: true })).toBe(true);
+    expect(isSettings({ charsets: ['lowercase'], groupCount: 30, nextKey: 'yes' })).toBe(false);
+  });
+
+  it('names every space marker so the settings row has no blank button', () => {
+    for (const spaceDisplay of SPACE_DISPLAYS) {
+      expect(SPACE_DISPLAY_LABELS[spaceDisplay]).toBeTruthy();
+    }
+    expect(preferredSpaceDisplay({ charsets: ['lowercase'], groupCount: 30 })).toBe('bar');
+    expect(preferredNextKey({ charsets: ['lowercase'], groupCount: 30 })).toBe(true);
   });
 });
 
 describe('isWorstUnit', () => {
-  it('accepts uni and bi entries only', () => {
+  it('accepts a single-character entry, with or without the removed kind field', () => {
+    expect(isWorstUnit({ unit: 'a', attempts: 2, errors: 1 })).toBe(true);
+    // v1 exports carried `kind`; it is ignored rather than rejected, so old files load.
     expect(isWorstUnit({ unit: 'a', kind: 'uni', attempts: 2, errors: 1 })).toBe(true);
-    expect(isWorstUnit({ unit: 'ab', kind: 'bi', attempts: 2, errors: 1 })).toBe(true);
-    expect(isWorstUnit({ unit: 'a', kind: 'tri', attempts: 2, errors: 1 })).toBe(false);
-    expect(isWorstUnit({ unit: 1, kind: 'uni', attempts: 2, errors: 1 })).toBe(false);
-    expect(isWorstUnit({ unit: 'a', kind: 'uni', attempts: '2', errors: 1 })).toBe(false);
+    expect(isWorstUnit({ unit: 1, attempts: 2, errors: 1 })).toBe(false);
+    expect(isWorstUnit({ unit: 'a', attempts: '2', errors: 1 })).toBe(false);
+    expect(isWorstUnit({ unit: 'a', attempts: 2 })).toBe(false);
     expect(isWorstUnit(null)).toBe(false);
   });
 });
@@ -137,7 +163,9 @@ describe('isSessionSummary', () => {
   it('accepts a complete summary, and one with null speeds', () => {
     expect(isSessionSummary(sample)).toBe(true);
     expect(isSessionSummary({ ...sample, cpm: null, wpm: null, medianIntervalMs: null })).toBe(true);
-    expect(isSessionSummary({ ...sample, worstUnits: [{ unit: 'a', kind: 'uni', attempts: 1, errors: 1 }] })).toBe(true);
+    expect(
+      isSessionSummary({ ...sample, worstUnits: [{ unit: 'a', attempts: 1, errors: 1 }] }),
+    ).toBe(true);
   });
 
   it('rejects the fields that the history view depends on', () => {
@@ -156,7 +184,8 @@ describe('isSessionSummary', () => {
 
   it('accepts a missing drill shape but not an unknown one', () => {
     expect(isSessionSummary({ ...sample, shape: 'words' })).toBe(true);
-    expect(isSessionSummary({ ...sample, shape: 'uniform' })).toBe(true);
+    expect(isSessionSummary({ ...sample, shape: 'text' })).toBe(true);
+    expect(isSessionSummary({ ...sample, shape: 'patterns' })).toBe(true);
     expect(isSessionSummary({ ...sample, shape: 'poetry' })).toBe(false);
   });
 });
@@ -168,15 +197,7 @@ describe('isAggregates', () => {
 
   it('requires every dimension, so a partial file cannot silently drop samples', () => {
     const aggregates = defaultStore(0).aggregates;
-    for (const key of [
-      'unigrams',
-      'bigrams',
-      'trigrams',
-      'byFinger',
-      'byHand',
-      'byShifted',
-      'byKind',
-    ]) {
+    for (const key of METRIC_MAP_KEYS) {
       const partial = { ...aggregates } as Record<string, unknown>;
       delete partial[key];
       expect(isAggregates(partial), `missing ${key} was accepted`).toBe(false);

@@ -8,8 +8,11 @@ export const DASH = '—';
 /** Visible stand-in for the space character in tables, where a blank cell is a lie. */
 export const SPACE_GLYPH = '␣';
 
+/** Visible stand-in for the newline target, which the text/code shape can produce. */
+export const NEWLINE_GLYPH = '⏎';
+
 export function displayUnit(unit: string): string {
-  return unit.replaceAll(' ', SPACE_GLYPH);
+  return unit.replaceAll(' ', SPACE_GLYPH).replaceAll('\n', NEWLINE_GLYPH);
 }
 
 export function formatPercent(value: number | null): string {

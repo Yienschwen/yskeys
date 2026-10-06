@@ -24,6 +24,14 @@ export interface ExportWordList {
   words: string[];
 }
 
+/** The imported text / code source, carried so an export stays self-contained. */
+export interface ExportTextSource {
+  name: string;
+  importedAt: number;
+  text: string;
+  stats: { bytes: number; files: number; skipped: number; lines: number };
+}
+
 export interface ExportFile {
   kind: typeof EXPORT_KIND;
   schemaVersion: number;
@@ -38,6 +46,8 @@ export interface ExportFile {
    * whatever is already stored alone.
    */
   wordList?: ExportWordList;
+  /** Same contract as `wordList`: present replaces, absent leaves the local one alone. */
+  textSource?: ExportTextSource;
 }
 
 export type ParseResult = { ok: true; file: ExportFile } | { ok: false; reason: string };
@@ -51,6 +61,7 @@ export function buildExportFile(
   now: number,
   appVersion: string,
   wordList?: ExportWordList,
+  textSource?: ExportTextSource,
 ): ExportFile {
   return {
     kind: EXPORT_KIND,
@@ -61,6 +72,7 @@ export function buildExportFile(
     aggregates: store.aggregates,
     sessions: store.sessions,
     ...(wordList === undefined ? {} : { wordList }),
+    ...(textSource === undefined ? {} : { textSource }),
   };
 }
 
@@ -144,6 +156,10 @@ export function parseExportFile(
   if (wordList !== undefined && !isExportWordList(wordList)) {
     return { ok: false, reason: 'wordList is malformed' };
   }
+  const textSource = value['textSource'];
+  if (textSource !== undefined && !isExportTextSource(textSource)) {
+    return { ok: false, reason: 'textSource is malformed' };
+  }
   return {
     ok: true,
     file: {
@@ -158,6 +174,7 @@ export function parseExportFile(
       aggregates,
       sessions,
       ...(wordList === undefined ? {} : { wordList }),
+      ...(textSource === undefined ? {} : { textSource }),
     },
   };
 }
@@ -169,6 +186,27 @@ function isExportWordList(value: unknown): value is ExportWordList {
     isFiniteNumber(value['importedAt']) &&
     Array.isArray(value['words']) &&
     value['words'].every((word) => typeof word === 'string')
+  );
+}
+
+function isExportTextSource(value: unknown): value is ExportTextSource {
+  if (
+    !isRecord(value) ||
+    typeof value['name'] !== 'string' ||
+    !isFiniteNumber(value['importedAt']) ||
+    typeof value['text'] !== 'string'
+  ) {
+    return false;
+  }
+  const stats = value['stats'];
+  if (stats === undefined) {
+    return true;
+  }
+  if (!isRecord(stats)) {
+    return false;
+  }
+  return ['bytes', 'files', 'skipped', 'lines'].every(
+    (key) => stats[key] === undefined || isFiniteNumber(stats[key]),
   );
 }
 
@@ -191,8 +229,6 @@ export function mergeStores(local: Store, incoming: ExportFile, now: number): St
       totalSessions: local.aggregates.totalSessions + incoming.aggregates.totalSessions,
       totalKeystrokes: local.aggregates.totalKeystrokes + incoming.aggregates.totalKeystrokes,
       unigrams: mergeMetricMaps(local.aggregates.unigrams, incoming.aggregates.unigrams),
-      bigrams: mergeMetricMaps(local.aggregates.bigrams, incoming.aggregates.bigrams),
-      trigrams: mergeMetricMaps(local.aggregates.trigrams, incoming.aggregates.trigrams),
       byFinger: mergeMetricMaps(local.aggregates.byFinger, incoming.aggregates.byFinger),
       byHand: mergeMetricMaps(local.aggregates.byHand, incoming.aggregates.byHand),
       byShifted: mergeMetricMaps(local.aggregates.byShifted, incoming.aggregates.byShifted),

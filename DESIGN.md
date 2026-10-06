@@ -158,11 +158,27 @@ Structural rules:
   var(--radius-sm)` and a `--surface` background; `.group.is-done` is dimmed with `opacity: 0.7`.
   Groups are **variable length** (5 characters today, whole words once the word generator lands), so
   the active group is found by range, never by dividing the cursor by a fixed size.
-- **The separator between groups is a real space character, not decoration.** It is a target the user
+- **The separator between chunks is a real space character, not decoration.** It is a target the user
   types, and it is recorded like any other key (one unigram, attributed to the thumb). It renders as
-  `<span class="ch ch--space">` with a low bar drawn in `::after`, because an empty box would be
-  invisible and would invite the user to guess. The bar takes the same state colours as a character
+  `<span class="ch ch--space">` with a marker drawn in `::after`, because an empty box would be
+  invisible and would invite the user to guess. The marker takes the same state colours as a character
   (`--text` correct, `--error` missed, `--warning` fixed, `--accent` current).
+- **Which marker is a setting** (PROJECT.md F12), applied as `data-space` on `.drill` so the choice is
+  one attribute and one CSS block, never a DOM change:
+  | `data-space` | Marker | Shape cue in grayscale? |
+  | --- | --- | --- |
+  | `bar` (default) | 0.28 × 2 px rule, low | yes — a solid rule |
+  | `blank` | nothing at all | no — the current-position highlight is the only cue, by request |
+  | `dot` | 0.2 em round dot, centred | yes — a round dot vs a rule |
+  | `dash` | 0.42 em × 1 px rule, lower | yes — width and weight differ from `bar` |
+
+  All four occupy the same fixed `min-width: 0.5em`, so switching can never reflow the line.
+- **A newline target in the text/code shape is a real line break.** It renders as
+  `<span class="ch ch--newline">`: zero width, `flex-basis: 100%` so it ends the visual line, and a
+  small `⏎` in `::after` that takes the same state colours. It is the only span whose geometry is not
+  a fixed mono cell, and it is allowed to move the line because that *is* the information: code has
+  lines. The span is not inside any `.group`, so group ranges are still found by range and never by
+  dividing the cursor by a fixed size.
 - There is **no flex gap in the drill**: the visual spacing between groups *is* that space character.
   Horizontal breathing room comes only from the zero-width-safe `padding-inline` on `.group`.
 - Long sessions wrap at **group boundaries** only, so a group is never split across lines.
@@ -187,6 +203,9 @@ renderer sets it in one place. Only one source of truth per state.
 | Charset toggle (pill) | `--surface-2`, `--text-muted` | `--surface-2` + `--border-strong` | same | ring | — | — |
 | Charset toggle (on) | `--accent-subtle` bg, `--accent` text, `--accent-border` border, **✓ glyph** | `--accent-subtle` + `--accent` border | same | ring | — | — |
 | Select / Segmented | `--surface` bg, `--border` | `--surface-2` | same | ring | 45% opacity | n/a |
+| Segmented, selected (`is-on`) | `--accent-subtle` bg, `--accent` text, `aria-pressed="true"` | unchanged | unchanged | ring | — | — |
+| Finger hint key cap | finger tint + `--border-strong` border | — | — | — | — | — |
+| Finger hint key cap, next (`is-next`) | finger tint, **2 px `--accent` border**, inset `--accent` outline, left `--accent` bar | — | — | — | — | — |
 | Text input (import search, confirm field) | `--bg`, `--border` | `--border-strong` | same | ring | 45% opacity | `--error` border + inline message |
 | Table row | transparent | `--surface-2` | n/a | n/a | n/a | `.is-worst` row: `--error` left border 2px |
 | Banner (info / warning / error) | `--accent-subtle` / `--warning-subtle` / `--error-subtle` + matching left border 3px | — | — | — | dismiss button hidden when not dismissible | n/a |
@@ -224,15 +243,24 @@ accessible source).
   plus a visually hidden data table for the same numbers.
 - Fewer than 2 points → render the empty state instead of a degenerate line.
 
-### 3.6 Heatmap (cuttable, F12)
+### 3.6 Finger hint (F13)
 
-- US QWERTY rows drawn with CSS grid; each key `min-width: 2.4rem`, `min-height: 2.4rem`,
-  `--radius-sm`, staggered row offsets of 0 / 0.4 / 0.9 key widths.
-- 5 accuracy buckets: `<60%` → `--error`, `60–79%` → `--warning`, `80–94%` → `--accent`,
-  `≥95%` → `--correct`, **no data** → `--surface-2` with a dashed `--border`.
-  Every bucket is also distinguishable by a border treatment, so the map survives grayscale.
-- Legend below the map shows bucket ranges and sample counts.
-- Below `--bp-md` the map gets `overflow-x: auto` with `min-width: 40rem`; it never scales below legibility.
+One `--surface` card between the drill and the stat row, holding two things side by side:
+
+- **The sentence.** `--text-md` mono: `Next: k → right middle finger`. This is the accessible
+  answer — the diagram is `aria-hidden` — and it is what the user reads when the diagram is too small.
+- **The diagram.** A five-row CSS grid, 15 columns wide, with row offsets of 0 / 0.5 / 0.9 / 1 key
+  widths so the stagger matches a real keyboard. Every cap is `--radius-sm`, `min-height: 1.5rem`, and
+  tinted by the finger that owns it (one `--finger-*` token per finger, both colour schemes). A shifted
+  character resolves to the same cap as its plain partner, so `{` lights up `[`.
+- **The next key is marked twice**: its finger tint stays, and it also gets a 2 px `--accent` border
+  plus an inset `--accent` outline and a left bar in `::before`. Two cues, not one hue, so the answer
+  never depends on distinguishing two similar tints — and the same holds in `forced-colors`, where the
+  tints are stripped and the border remains.
+- The panel is hidden entirely (`[hidden]`) when the drill is done, and says "No key for that
+  character" rather than showing a stale mark. Below `--bp-md` the diagram takes the full width under
+  the sentence.
+- Hiding the panel is a setting, not a mode: with `nextKey: false` the card is never rendered.
 
 ---
 
@@ -249,6 +277,8 @@ accessible source).
   `--error-subtle`); use `outline-offset` rather than inner shadows so it is not clipped by
   `overflow: hidden`.
 - The practice view holds focus for typing; clicking anywhere in the drill area returns focus to it.
+  The click handler ignores anything inside a button, input, select, textarea, link, label or a
+  `[data-interactive]` container, so returning focus can never steal it from a control.
 
 ### 4.2 Dialogs
 
@@ -263,7 +293,7 @@ Native `<dialog>` with `::backdrop { background: rgb(0 0 0 / 0.45) }`. Focus is 
 | printable `key.length === 1` | type | ignored when a dialog is open |
 | `Backspace` | fix display only | `preventDefault()` so it never navigates |
 | `Esc` | abort session / close dialog | in the destructive dialog it cancels |
-| `Enter` | start next session (from result view) | must not trigger while typing mid-session |
+| `Enter` | newline target while the drill expects one; otherwise start the next session from the result view | only `preventDefault()`ed when `target[cursor] === '\n'`, so it never becomes a dead key elsewhere |
 | `Tab` / `Shift+Tab` | **never intercepted** | keyboard navigation, see §8 |
 
 ### 4.4 State transitions and feedback
@@ -285,7 +315,7 @@ Native `<dialog>` with `::backdrop { background: rgb(0 0 0 / 0.45) }`. Focus is 
 
 ```
 ┌─ sticky header ────────────────────────────────────────────────┐
-│ yskeys   [charsets]  [length] [mode]        [History] [Export] │
+│ yskeys  [charsets] [shape] [space marker] [finger hint] [groups]  [History] │
 │ ── 2px progress bar (practice only) ────────────────────────── │
 └────────────────────────────────────────────────────────────────┘
   banner slot (storage warning) — pushes content down, never overlays
@@ -344,6 +374,7 @@ no async loading, so a spinner would be a lie.
 ```css
 :root {
   /* palette (--c-*) then semantic tokens; dark overrides in one media block */
+  /* plus nine --finger-* tokens, which are semantic and have a dark value each */
 }
 @media (prefers-color-scheme: dark) { :root { /* semantic tokens only */ } }
 @media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms; } }
@@ -356,6 +387,10 @@ Rules:
    table, banner, dialog, chart, heatmap) → utilities → media queries. No `!important` outside
    `forced-colors` overrides.
 4. Any token removed from the file must be removed from this document.
+5. The nine `--finger-*` tokens are the only exception to "one colour per state": they encode an
+   identity (which finger owns a key), not a state, and they are always paired with the border cue in
+   §3.6. Every one of them needs a dark value in the same commit, since a light tint on a dark page
+   would leave the key legend unreadable.
 
 ---
 
@@ -370,3 +405,13 @@ Both items below contradicted decisions recorded in `PROJECT.md`; both were deci
 2. **`Tab` is not a shortcut.** `PROJECT.md` F2 originally assigned `Tab` to "restart", which would
    trap keyboard users in the practice view. Decided: `Tab`/`Shift+Tab` are never intercepted; `Esc`
    aborts/restarts and `Enter` advances from the result view (§4.3). `PROJECT.md` F2 now matches.
+3. **`Enter` is a target before it is a shortcut.** F12 (space marker) and F14 (text source) made a
+   newline a real character to type, which collides with "`Enter` starts the next session". Decided:
+   `Enter` is only swallowed when the drill's cursor is on a newline, so in the words and patterns
+   shapes it behaves exactly as before (§4.3). The same rule keeps `Esc` unambiguous, because it is
+   never a target.
+4. **A blank space marker is allowed.** §1.3 of this document said state must never be colour-only;
+   `spaceDisplay: 'blank'` removes the shape cue from the space target entirely. Decided: the rule is
+   about *states*, and the space marker is about *legibility of a separator the user asked to hide*.
+   The current-position highlight still marks the slot, and the option is off by default — so the
+   default rendering keeps its two cues.

@@ -2,7 +2,6 @@ import {
   COLD_START_ROW_WEIGHT,
   COLD_START_SHIFTED_FACTOR,
   EXPLORATION_SHARE,
-  MIN_OBSERVED_BIGRAM_ATTEMPTS,
   SAMPLE_BOOST,
   SAMPLE_BOOST_THRESHOLD,
   SESSION_UNIT_DECAY,
@@ -30,20 +29,20 @@ import type { Rng } from './random';
  *  2. The weight floor is tiny (0.01), not a real share. Not starving a unit is the job
  *     of the uniform exploration draw; a floor big enough to matter would also lift the
  *     strongest units and flatten the differences the weights are there to express.
+ *
+ * Units are single characters only. Pairs and triples were removed on purpose: they
+ * double-count the same keystroke as evidence, and the display has no way to show a
+ * pair as the thing being practised. See PROJECT.md §7.
  */
-
-export type UnitKind = 'uni' | 'bi';
 
 export interface Candidate {
   readonly unit: string;
-  readonly kind: UnitKind;
   readonly weight: number;
   readonly attempts: number;
 }
 
 export interface AdaptiveSource {
   readonly unigrams: Readonly<Record<string, Metric>>;
-  readonly bigrams: Readonly<Record<string, Metric>>;
   readonly charsets: readonly CharsetId[];
 }
 
@@ -70,10 +69,7 @@ export function unitWeight(metric: Metric): number {
 }
 
 export function isColdStart(source: AdaptiveSource): boolean {
-  return (
-    !Object.values(source.unigrams).some((metric) => metric.attempts > 0) &&
-    !Object.values(source.bigrams).some((metric) => metric.attempts > 0)
-  );
+  return !Object.values(source.unigrams).some((metric) => metric.attempts > 0);
 }
 
 export function coldStartCandidates(
@@ -88,7 +84,7 @@ export function coldStartCandidates(
     const info = keyInfo(char);
     const rowWeight = COLD_START_ROW_WEIGHT[info?.row ?? 1] ?? 0.5;
     const shiftFactor = info?.shifted === true ? COLD_START_SHIFTED_FACTOR : 1;
-    list.push({ unit: char, kind: 'uni', weight: rowWeight * shiftFactor, attempts: 0 });
+    list.push({ unit: char, weight: rowWeight * shiftFactor, attempts: 0 });
   }
   return list;
 }
@@ -107,23 +103,9 @@ export function measuredCandidates(
     const metric = source.unigrams[char];
     list.push({
       unit: char,
-      kind: 'uni',
       weight: metric === undefined || metric.attempts === 0 ? UNSEEN_WEIGHT : unitWeight(metric),
       attempts: metric?.attempts ?? 0,
     });
-  }
-
-  for (const [unit, metric] of Object.entries(source.bigrams)) {
-    if (metric.attempts < MIN_OBSERVED_BIGRAM_ATTEMPTS) {
-      continue;
-    }
-    if (![...unit].every((char) => drivable.has(char))) {
-      continue;
-    }
-    if (available !== undefined && !available.has(unit)) {
-      continue;
-    }
-    list.push({ unit, kind: 'bi', weight: unitWeight(metric), attempts: metric.attempts });
   }
 
   return list;

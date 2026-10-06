@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { CHARSETS } from '../core/charset';
-import { KEY_LAYOUT, keyInfo } from '../core/layout';
+import {
+  DIAGRAM_ROWS,
+  FINGER_LABELS,
+  KEY_LAYOUT,
+  fingerHintFor,
+  keyInfo,
+} from '../core/layout';
 
 describe('key layout', () => {
   it('maps every character of every charset', () => {
@@ -11,8 +17,15 @@ describe('key layout', () => {
     }
   });
 
-  it('knows every charset character plus the space bar', () => {
-    expect(KEY_LAYOUT.size).toBe(95);
+  it('knows every charset character plus space, newline and tab', () => {
+    // 94 printable non-space characters, plus the three targets the layout adds.
+    expect(KEY_LAYOUT.size).toBe(97);
+  });
+
+  it('gives the newline a real key, since the text shape types it', () => {
+    expect(keyInfo('\n')?.finger).toBe('r-pinky');
+    expect(keyInfo('\n')?.kind).toBe('control');
+    expect(keyInfo('\t')?.finger).toBe('l-pinky');
   });
 
   it('gives the space bar its own key, finger and kind', () => {
@@ -22,10 +35,11 @@ describe('key layout', () => {
     expect(keyInfo(' ')?.row).toBe(5);
   });
 
-  it('records every key in both its plain and shifted form, plus the space bar', () => {
+  it('records every key in both its plain and shifted form, plus the extras', () => {
     const values = [...KEY_LAYOUT.values()];
-    // 47 physical keys, each in a plain and a shifted form, plus space (unshifted only).
-    expect(values.filter((key) => !key.shifted)).toHaveLength(48);
+    // 47 physical keys, each in a plain and a shifted form, plus space, newline and
+    // tab: all three are unshifted.
+    expect(values.filter((key) => !key.shifted)).toHaveLength(50);
     expect(values.filter((key) => key.shifted)).toHaveLength(47);
   });
 
@@ -71,13 +85,36 @@ describe('key layout', () => {
       expect(key.row, key.char).toBeGreaterThanOrEqual(1);
       // Row 5 is the space bar, below the four character rows.
       expect(key.row, key.char).toBeLessThanOrEqual(5);
-      expect(key.col, key.char).toBeGreaterThanOrEqual(0);
-      expect(key.col, key.char).toBeLessThanOrEqual(12);
+      expect(key.col, key.char).toBeGreaterThanOrEqual(-1);
+      expect(key.col, key.char).toBeLessThanOrEqual(13);
     }
   });
 
   it('returns null for characters that are not on the keyboard', () => {
     expect(keyInfo('中')).toBeNull();
     expect(keyInfo('')).toBeNull();
+  });
+
+  it('names the finger of every key, for the hint panel', () => {
+    for (const key of KEY_LAYOUT.values()) {
+      expect(FINGER_LABELS[key.finger], key.char).toBeTruthy();
+    }
+    expect(FINGER_LABELS['l-index']).toBe('left index finger');
+    expect(fingerHintFor('f')).toMatchObject({ label: 'left index finger', shifted: false });
+    expect(fingerHintFor('F')?.shifted).toBe(true);
+    expect(fingerHintFor('中')).toBeNull();
+  });
+
+  it('lays out the diagram with the four character rows and the space bar', () => {
+    expect(DIAGRAM_ROWS).toHaveLength(5);
+    expect(DIAGRAM_ROWS[4]?.space).toBe(true);
+    expect(DIAGRAM_ROWS[4]?.keyCaps).toHaveLength(0);
+    // Every key cap names the finger that owns it, and the bottom row is left blank.
+    for (const row of DIAGRAM_ROWS.slice(0, 4)) {
+      expect(row.keyCaps.length).toBeGreaterThan(9);
+      for (const cap of row.keyCaps) {
+        expect(cap.finger).toBe(keyInfo(cap.char)?.finger);
+      }
+    }
   });
 });

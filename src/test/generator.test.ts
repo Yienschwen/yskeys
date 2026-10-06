@@ -3,10 +3,11 @@ import { WORD_MAX_LENGTH } from '../config';
 import { charsFor, defaultCharsetIds } from '../core/charset';
 import type { CharsetId } from '../core/charset';
 import {
+  EmptyDrillSourceError,
   buildAdaptiveDrill,
   buildUniformDrill,
+  buildUnitIndex,
   buildWordDrill,
-  buildWordIndex,
   embedUnit,
   isWordListUsable,
   materializeUnit,
@@ -208,13 +209,17 @@ describe('usableWords and isWordListUsable', () => {
   });
 });
 
-describe('buildWordIndex and materializeUnit', () => {
+describe('buildUnitIndex and materializeUnit', () => {
   it('indexes single characters and adjacent pairs', () => {
-    const index = buildWordIndex(['the', 'them']);
+    const index = buildUnitIndex(['the', 'them']);
     expect(index.get('th')).toEqual([0, 1]);
     expect(index.get('he')).toEqual([0, 1]);
     expect(index.get('e')).toEqual([0, 1]);
     expect(index.get('hh')).toBeUndefined();
+  });
+
+  it('records a repeated unit inside one chunk once', () => {
+    expect(buildUnitIndex(['aab']).get('a')).toEqual([0]);
   });
 
   it('keeps the drawn unit contiguous when it embeds it', () => {
@@ -242,24 +247,39 @@ describe('buildWordIndex and materializeUnit', () => {
       shape: 'words' as const,
       charsets: ['lowercase'] as const,
       words,
-      index: buildWordIndex(words),
+      sourceChunks: [] as const,
+      index: buildUnitIndex(words),
       rng: createRng(2),
     };
     expect(materializeUnit('ac', context)).toContain('ac');
     expect(words).toContain(materializeUnit('zz', context));
+  });
+
+  it('returns a source chunk containing the unit in the text shape', () => {
+    const chunks = ['const x = 1;', 'return x;', '}'];
+    const context = {
+      shape: 'text' as const,
+      charsets: ['lowercase', 'symbols', 'digits'] as const,
+      words: [] as const,
+      sourceChunks: chunks,
+      index: buildUnitIndex(chunks),
+      rng: createRng(2),
+    };
+    expect(chunks).toContain(materializeUnit('re', context));
+    // A unit no chunk contains falls back to a chunk anyway rather than to nothing.
+    expect(chunks).toContain(materializeUnit('zq', context));
   });
 });
 
 describe('buildAdaptiveDrill', () => {
   const source = {
     unigrams: { a: { attempts: 50, firstTryCorrect: 10, wrongTyped: {} } },
-    bigrams: {},
     charsets: ['lowercase'] as const,
   };
 
   it('reaches the character target with character groups', () => {
     const drill = buildAdaptiveDrill({
-      shape: 'uniform',
+      shape: 'patterns',
       charsets: ['lowercase'],
       targetChars: 40,
       source,
@@ -274,7 +294,7 @@ describe('buildAdaptiveDrill', () => {
   it('produces a different drill when the weakness moves to another unit', () => {
     const build = (weak: 'a' | 'b'): Drill =>
       buildAdaptiveDrill({
-        shape: 'uniform',
+        shape: 'patterns',
         charsets: ['lowercase'],
         targetChars: 120,
         source: {
@@ -282,7 +302,6 @@ describe('buildAdaptiveDrill', () => {
             a: { attempts: 100, firstTryCorrect: weak === 'a' ? 50 : 100, wrongTyped: {} },
             b: { attempts: 100, firstTryCorrect: weak === 'b' ? 50 : 100, wrongTyped: {} },
           },
-          bigrams: {},
           charsets: ['lowercase'],
         },
         seed: 8,
@@ -303,7 +322,6 @@ describe('buildAdaptiveDrill', () => {
       // q has no word in the list below, so it must not be drawable here.
       source: {
         unigrams: { q: { attempts: 20, firstTryCorrect: 1, wrongTyped: {} } },
-        bigrams: {},
         charsets: ['lowercase'],
       },
       seed: 4,
@@ -325,6 +343,57 @@ describe('buildAdaptiveDrill', () => {
         source,
         seed: 1,
       }),
-    ).toThrow(/no units are available/);
+    ).toThrow(EmptyDrillSourceError);
+  });
+});
+
+describe('buildAdaptiveDrill in the text shape', () => {
+  const source = {
+    unigrams: { c: { attempts: 40, firstTryCorrect: 4, wrongTyped: {} } },
+    charsets: ['lowercase', 'symbols', 'digits'] as const,
+  };
+  const chunks = ['const total = 1;', '\n', 'return total;', '\n', '}'];
+
+  it('reproduces the source exactly, line breaks included', () => {
+    const drill = buildAdaptiveDrill({
+      shape: 'text',
+      charsets: ['lowercase', 'symbols', 'digits'],
+      targetChars: 20,
+      textChunks: chunks,
+      source,
+      seed: 11,
+    });
+
+    expect(drill.separator).toBe('');
+    expect(drill.text).toBe(drill.groups.join(''));
+    // Every newline in the target came from a chunk that is exactly a newline.
+    const newlines = drill.text.length - drill.text.replaceAll('\n', '').length;
+    expect(newlines).toBe(drill.groups.filter((chunk) => chunk === '\n').length);
+  });
+
+  it('refuses to build when the source has no chunks', () => {
+    expect(() =>
+      buildAdaptiveDrill({
+        shape: 'text',
+        charsets: ['lowercase'],
+        targetChars: 20,
+        textChunks: [],
+        source,
+        seed: 1,
+      }),
+    ).toThrow(/no chunks are available/);
+  });
+
+  it('joins word chunks with the space the user types', () => {
+    const drill = buildAdaptiveDrill({
+      shape: 'words',
+      charsets: ['lowercase'],
+      targetChars: 12,
+      words: ['acid', 'acorn', 'bread', 'cider'],
+      source: { unigrams: { a: { attempts: 9, firstTryCorrect: 1, wrongTyped: {} } }, charsets: ['lowercase'] },
+      seed: 5,
+    });
+    expect(drill.separator).toBe(' ');
+    expect(drill.text).toBe(drill.groups.join(' '));
   });
 });

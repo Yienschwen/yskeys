@@ -1,10 +1,12 @@
-import { CHART_MAX_POINTS, LOW_SAMPLE_ATTEMPTS, TRIGRAM_DISPLAY_MIN_ATTEMPTS, WEAK_TABLE_LIMIT } from '../config';
+import { CHART_MAX_POINTS, LOW_SAMPLE_ATTEMPTS, WEAK_TABLE_LIMIT } from '../config';
+import { FINGER_LABELS } from '../core/layout';
+import type { FingerId } from '../core/layout';
 import { sortUnitRows, unitRows } from '../core/metrics';
 import type { Metric, SortDirection, UnitRow, UnitSortKey } from '../core/metrics';
 import type { Store, TrainingMode } from '../store/schema';
 import { createCpmChart } from './chart';
 import { h } from './dom';
-import { formatCount, displayUnit, formatPercent, formatSpeed } from './format';
+import { displayUnit, formatCount, formatPercent, formatSpeed } from './format';
 import { createStatRow } from './stat';
 
 /**
@@ -20,6 +22,11 @@ export interface HistoryActions {
   readonly undo: () => void;
   readonly importWordList: (file: File) => void;
   readonly removeWordList: () => void;
+  /** A `.zip` of a repository, or a set of plain-text files. */
+  readonly importTextSource: (files: readonly File[]) => void;
+  /** A block pasted into the textarea, for the "just show me a snippet" case. */
+  readonly importPastedText: (text: string) => void;
+  readonly removeTextSource: () => void;
   readonly setMode: (mode: TrainingMode) => void;
 }
 
@@ -29,11 +36,20 @@ export interface WordListInfo {
   readonly wordCount: number;
 }
 
+export interface TextSourceInfo {
+  readonly name: string;
+  readonly importedAt: number;
+  readonly chars: number;
+  readonly files: number;
+  readonly lines: number;
+}
+
 export interface HistoryInput {
   readonly store: Store;
   readonly actions: HistoryActions;
   readonly canUndo: boolean;
   readonly wordList: WordListInfo | null;
+  readonly textSource: TextSourceInfo | null;
   /** Weighting mode, which lives here rather than in the header: it is a control for
    *  checking whether the adaptive part helps, not a daily setting. */
   readonly mode: TrainingMode;
@@ -68,12 +84,6 @@ export function createHistoryView(input: HistoryInput): HTMLElement {
   root.append(createTotals(store));
   root.append(createTrend(store));
   root.append(createUnitTable('Single characters', store.aggregates.unigrams));
-  root.append(createUnitTable('Character pairs', store.aggregates.bigrams, { minAttempts: 2 }));
-  root.append(
-    createUnitTable('Character triples (3+ attempts)', store.aggregates.trigrams, {
-      minAttempts: TRIGRAM_DISPLAY_MIN_ATTEMPTS,
-    }),
-  );
   root.append(createUnitTable('By finger', store.aggregates.byFinger));
   root.append(createBreakdown(store));
   root.append(createModePanel(input));
@@ -252,9 +262,14 @@ function createUnitTable(
 function createRow(row: UnitRow): HTMLElement {
   const tr = h('tr');
   const unitCell = h('td');
-  const label = displayUnit(row.unit);
+  // The finger tables hold internal ids (`l-pinky`); the label is what a human reads,
+  // and the id stays available as the tooltip for anyone matching it to the layout.
+  const finger = FINGER_LABELS[row.unit as FingerId];
+  const label = finger ?? displayUnit(row.unit);
   const unit = h('span', 'table__unit', label);
-  if (label !== row.unit) {
+  if (finger !== undefined) {
+    unit.title = row.unit;
+  } else if (label !== row.unit) {
     unit.title = 'contains a space';
   }
   unitCell.append(unit);
@@ -320,6 +335,7 @@ function createDataPanel(input: HistoryInput): HTMLElement {
   panel.append(h('h3', 'panel__title', 'Your data'));
   panel.append(createHistoryRow(input));
   panel.append(createWordListRow(input));
+  panel.append(createTextSourceRow(input));
   panel.append(
     h(
       'p',
@@ -418,6 +434,93 @@ function formatDate(timestamp: number): string {
     return 'at an unknown time';
   }
   return `on ${new Date(timestamp).toISOString().slice(0, 10)}`;
+}
+
+/**
+ * The text / code source (PROJECT.md F14). Two doors in, because the two real cases are
+ * different: a repository is one `.zip`, while "practise my own file" is one plain-text
+ * file. Both are read in the browser and never uploaded anywhere.
+ */
+function createTextSourceRow(input: HistoryInput): HTMLElement {
+  const row = h('div', 'data-row');
+  row.append(h('h4', 'data-row__title', 'Text or code'));
+
+  const source = input.textSource;
+  row.append(
+    h(
+      'p',
+      'view__lead',
+      source === null
+        ? 'No text source yet. Upload a repository (.zip) or any plain-text file to practise your own material line by line.'
+        : `${source.name} — ${formatCount(source.chars)} characters, ` +
+            `${formatCount(source.lines)} lines, ${formatCount(source.files)} files, ` +
+            `imported ${formatDate(source.importedAt)}.`,
+    ),
+  );
+
+  const actions = h('div', 'dialog__actions');
+
+  const zipInput = h('input', 'visually-hidden');
+  zipInput.type = 'file';
+  zipInput.accept = '.zip,application/zip';
+  zipInput.addEventListener('change', () => {
+    const file = zipInput.files?.[0];
+    if (file) {
+      input.actions.importTextSource([file]);
+    }
+    zipInput.value = '';
+  });
+  const zipLabel = h('label', 'button');
+  zipLabel.append('Upload repository (.zip)', zipInput);
+  actions.append(zipLabel);
+
+  const fileInput = h('input', 'visually-hidden');
+  fileInput.type = 'file';
+  fileInput.multiple = true;
+  fileInput.accept = '.txt,.md,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.c,.h,.cpp,.css,.html,.json,.yml,.yaml,text/plain';
+  fileInput.addEventListener('change', () => {
+    const files = [...(fileInput.files ?? [])];
+    if (files.length > 0) {
+      input.actions.importTextSource(files);
+    }
+    fileInput.value = '';
+  });
+  const fileLabel = h('label', 'button');
+  fileLabel.append('Upload text or code files', fileInput);
+  actions.append(fileLabel);
+
+  if (source !== null) {
+    const remove = h('button', 'button button--danger', 'Remove text source');
+    remove.type = 'button';
+    remove.addEventListener('click', input.actions.removeTextSource);
+    actions.append(remove);
+  }
+
+  row.append(actions);
+
+  // A paste box, for a snippet that is not worth saving to a file first.
+  const paste = h('form', 'paste');
+  const pasteLabel = h('label', 'field__label', 'Or paste code or text');
+  pasteLabel.htmlFor = 'yskeys-paste';
+  const textarea = h('textarea', 'textarea');
+  textarea.id = 'yskeys-paste';
+  textarea.rows = 4;
+  textarea.placeholder = 'Paste here, then choose Import pasted text';
+  const pasteButton = h('button', 'button', 'Import pasted text');
+  pasteButton.type = 'submit';
+  paste.append(pasteLabel, textarea, pasteButton);
+  paste.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const text = textarea.value;
+    if (text.trim().length === 0) {
+      return;
+    }
+    textarea.value = '';
+    input.actions.importPastedText(text);
+  });
+  row.append(paste);
+
+  return row;
 }
 
 function sumCorrect(store: Store): number {

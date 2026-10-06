@@ -16,7 +16,7 @@ function sessionFor(target: string, keys: readonly string[], startedAt = 1000, s
     id: createSessionId(startedAt, 1),
     startedAt,
     mode: 'uniform',
-    shape: 'uniform',
+    shape: 'patterns',
     worstLimit: RESULT_WEAK_LIMIT,
   });
   return { state, tally, summary };
@@ -44,7 +44,10 @@ describe('applySession', () => {
     expect(next.aggregates.byShifted['shifted']?.attempts).toBe(1);
     expect(next.aggregates.byShifted['plain']?.attempts).toBe(3);
     expect(next.aggregates.byKind['digit']?.attempts).toBe(1);
-    expect(next.aggregates.trigrams['afJ']?.attempts).toBe(1);
+    // The n-gram dimensions are gone: a keystroke is evidence for its character and
+    // for the layout bucket it belongs to, and for nothing else.
+    expect(Object.keys(next.aggregates)).not.toContain('bigrams');
+    expect(Object.keys(next.aggregates)).not.toContain('trigrams');
     expect(next.sessions).toHaveLength(1);
   });
 
@@ -87,7 +90,7 @@ describe('buildSessionSummary', () => {
       id: 's-test-1',
       startedAt: 1000,
       mode: 'uniform',
-      shape: 'uniform',
+      shape: 'patterns',
       worstLimit: RESULT_WEAK_LIMIT,
     });
 
@@ -112,7 +115,7 @@ describe('buildSessionSummary', () => {
       id: 's-test-2',
       startedAt: 1000,
       mode: 'uniform',
-      shape: 'uniform',
+      shape: 'patterns',
       worstLimit: RESULT_WEAK_LIMIT,
     });
     expect(summary.cpm).toBeNull();

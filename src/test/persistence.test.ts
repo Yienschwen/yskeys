@@ -85,7 +85,7 @@ function unitName(index: number): string {
  * comfortably past the 2 M limit, and halving it lands well under, so the pruning
  * loop terminates in one pass.
  */
-function bigStore(dimension: 'trigrams' | 'bigrams', units: number): Store {
+function bigStore(dimension: 'unigrams', units: number): Store {
   const map: Record<string, Metric> = {};
   for (let index = 0; index < units; index += 1) {
     map[unitName(index)] = { attempts: index + 1, firstTryCorrect: index, wrongTyped: {} };
@@ -152,7 +152,7 @@ describe('saveStore', () => {
 
   it('prunes before writing when the payload is over budget', () => {
     const storage = new MemoryStorage();
-    const result = saveStore(storage, bigStore('trigrams', 45_000));
+    const result = saveStore(storage, bigStore('unigrams', 45_000));
     expect(result.ok).toBe(true);
     expect(result.pruned).toBeGreaterThan(0);
     expect(storage.getItem(STORAGE_KEY)?.length).toBeLessThanOrEqual(MAX_PAYLOAD_CHARS);
@@ -160,8 +160,8 @@ describe('saveStore', () => {
 });
 
 describe('enforceBudget', () => {
-  it('drops the weakest trigrams first and keeps the strongest', () => {
-    const store = bigStore('trigrams', 45_000);
+  it('drops the least-practised characters first and keeps the strongest', () => {
+    const store = bigStore('unigrams', 45_000);
     const text = JSON.stringify(store);
     expect(text.length).toBeGreaterThan(MAX_PAYLOAD_CHARS);
 
@@ -169,22 +169,64 @@ describe('enforceBudget', () => {
     expect(result.dropped).toBeGreaterThan(0);
     expect(JSON.stringify(result.store).length).toBeLessThanOrEqual(MAX_PAYLOAD_CHARS);
 
-    const kept = result.store.aggregates.trigrams;
+    const kept = result.store.aggregates.unigrams;
     expect(kept[unitName(0)]).toBeUndefined();
     expect(kept[unitName(44_999)]).toBeDefined();
     expect(kept[unitName(44_999)]?.attempts).toBe(45_000);
-    // Bigrams were not touched, because pruning trigrams was enough.
-    expect(Object.keys(result.store.aggregates.bigrams)).toHaveLength(0);
+    // The other dimensions are bounded by the layout, so they are never trimmed.
+    expect(Object.keys(result.store.aggregates.byFinger)).toHaveLength(0);
   });
 
-  it('prunes bigrams once there are no trigrams left to prune', () => {
-    const store = bigStore('bigrams', 45_000);
-    const result = enforceBudget(JSON.stringify(store), store);
+  it('drops session summaries before touching the per-character counters', () => {
+    const store = defaultStore(0);
+    const sessions = Array.from({ length: 40 }, (_, index) => ({
+      ...defaultStore(0).sessions[0],
+      id: `s-${String(index)}`,
+      startedAt: index,
+      durationMs: 1000,
+      mode: 'adaptive' as const,
+      shape: 'patterns' as const,
+      charsets: ['lowercase' as const],
+      totalChars: 150,
+      attempts: 150,
+      firstTryCorrect: 140,
+      backspaces: 2,
+      cpm: 200,
+      wpm: 40,
+      medianIntervalMs: 180,
+      worstUnits: Array.from({ length: 40 }, (__, i) => ({
+        unit: unitName(i),
+        attempts: 4,
+        errors: 1,
+      })),
+    }));
+    const padded: Store = {
+      ...store,
+      sessions,
+      aggregates: {
+        ...store.aggregates,
+        unigrams: { a: { attempts: 5, firstTryCorrect: 4, wrongTyped: {} } },
+      },
+    };
 
-    expect(result.dropped).toBeGreaterThan(0);
-    expect(Object.keys(result.store.aggregates.trigrams)).toHaveLength(0);
-    expect(Object.keys(result.store.aggregates.bigrams).length).toBeLessThan(45_000);
-    expect(JSON.stringify(result.store).length).toBeLessThanOrEqual(MAX_PAYLOAD_CHARS);
+    const result = enforceBudget('x'.repeat(MAX_PAYLOAD_CHARS + 10), padded);
+
+    // The summaries are halved while the characters survive, because the characters are
+    // the only evidence adaptive weighting has.
+    expect(result.store.sessions.length).toBeLessThan(sessions.length);
+    expect(result.store.aggregates.unigrams['a']?.attempts).toBe(5);
+  });
+
+  it('gives up rather than looping when there is nothing left to drop', () => {
+    const store = defaultStore(1);
+    const padded: Store = {
+      ...store,
+      // A single character metric that still cannot fit: the loop must stop.
+      aggregates: { ...store.aggregates, unigrams: { a: { attempts: 1, firstTryCorrect: 1, wrongTyped: {} } } },
+    };
+    const result = enforceBudget('x'.repeat(MAX_PAYLOAD_CHARS + 10), padded);
+    expect(result.dropped).toBe(1);
+    expect(Object.keys(result.store.aggregates.unigrams)).toHaveLength(0);
   });
 
   it('leaves a store that is already within budget alone', () => {

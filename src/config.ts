@@ -7,7 +7,12 @@ export const APP_VERSION = '0.0.0';
 
 /* ---------------------------------------------------------------- storage -- */
 
-export const SCHEMA_VERSION = 1;
+/**
+ * Bumped to 2 when the n-gram dimensions were removed. v1 payloads are migrated by
+ * dropping `bigrams`/`trigrams` (see `store/migrations.ts`), so an existing history
+ * survives the schema change instead of being parked as corrupt.
+ */
+export const SCHEMA_VERSION = 2;
 export const STORAGE_KEY = 'yskeys:v1:store';
 export const BACKUP_KEY_PREFIX = 'yskeys:backup:';
 /** Unreadable payloads are parked here instead of being overwritten. */
@@ -24,14 +29,6 @@ export const MAX_PAYLOAD_CHARS = 2_000_000;
 
 /** Checked before parsing, so a malformed 20 MB file cannot hang the page. */
 export const MAX_IMPORT_CHARS = 20_000_000;
-
-/**
- * Trigrams below this many attempts stay out of the UI, but they are still
- * accumulated and persisted. The original "only persist >= 3 attempts" rule silently
- * reset sub-threshold counts on every write, so a trigram seen once per session could
- * never reach the threshold.
- */
-export const TRIGRAM_DISPLAY_MIN_ATTEMPTS = 3;
 
 /** Rows shown per weak-spot table before "show all" (PROJECT.md F7). */
 export const WEAK_TABLE_LIMIT = 15;
@@ -66,6 +63,74 @@ export const MIN_USABLE_WORDS = 25;
 /** How often a word is title-cased when the uppercase charset is enabled. */
 export const CAPITALIZE_PROBABILITY = 0.35;
 
+/* --------------------------------------------------------- text/code source -- */
+
+/**
+ * Its own key for the same reason the word list has one: it is a file the user had to
+ * go and fetch, so history pruning and "clear all data" must not remove it.
+ */
+export const TEXTSOURCE_KEY = 'yskeys:v1:text';
+
+/**
+ * A pasted repository is much bigger than a word list, but it does not all need to be
+ * kept: only the normalised practice text is stored, and it is capped.
+ */
+export const MAX_TEXTSOURCE_CHARS = 1_000_000;
+
+/** How much of an uploaded repository is kept, in characters of normalised text. */
+export const MAX_SOURCE_TEXT_CHARS = 200_000;
+
+/** Guard against a pathological upload: a 20 MB archive would be pointless to decode. */
+export const MAX_ZIP_BYTES = 24_000_000;
+
+/**
+ * Runs longer than this are trimmed. A minified bundle or a data blob is one enormous
+ * "line", and one chunk that long would swallow a whole drill.
+ */
+export const MAX_SOURCE_RUN_CHARS = 120;
+
+/** Chunks are the unit of display for the text shape, so more than this is noise. */
+export const MAX_SOURCE_CHUNKS = 20_000;
+
+/**
+ * The smallest run worth practising. Below this the drill degenerates into single
+ * characters with a stray space, which the character sets already do better.
+ */
+export const MIN_SOURCE_RUN_CHARS = 2;
+
+/**
+ * A repository is mostly not source code. Extensions are matched case-insensitively;
+ * anything else is counted as skipped rather than silently ignored.
+ */
+export const SOURCE_EXTENSIONS: readonly string[] = [
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.css', '.scss', '.less',
+  '.html', '.htm', '.vue', '.svelte', '.py', '.rb', '.go', '.rs', '.java', '.kt',
+  '.c', '.h', '.cc', '.cpp', '.hpp', '.cs', '.php', '.swift', '.m', '.mm', '.scala',
+  '.sh', '.bash', '.zsh', '.fish', '.ps1', '.sql', '.yml', '.yaml', '.toml', '.ini',
+  '.cfg', '.conf', '.graphql', '.gql', '.proto', '.md', '.txt', '.rst', '.tex',
+  '.lua', '.pl', '.r', '.dart', '.ex', '.exs', '.erl', '.hs', '.clj', '.elm',
+  '.tf', '.hcl', '.gradle', '.properties', '.dockerfile', '.makefile', '.cmake',
+];
+
+/** A file name without an extension that is still a text file worth reading. */
+export const SOURCE_FILENAMES: readonly string[] = ['dockerfile', 'makefile', 'cmakelists.txt'];
+
+/** Directories whose contents are never practice material. Matched on any path segment. */
+export const SOURCE_EXCLUDED_SEGMENTS: readonly string[] = [
+  '.git', '.hg', '.svn', 'node_modules', 'dist', 'build', 'out', 'target', 'vendor',
+  'coverage', '.next', '.nuxt', '.cache', '.venv', 'venv', '__pycache__', '.idea',
+  '.vscode', 'bower_components', 'jspm_packages', '.terraform', 'Pods',
+];
+
+/** Names that are generated, minified or vendored, and so are not good practice text. */
+export const SOURCE_EXCLUDED_FILES: readonly string[] = [
+  'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'composer.lock', 'cargo.lock',
+  'poetry.lock', 'gemfile.lock', 'go.sum',
+];
+
+/** Below this many drivable characters a file is not worth keeping. */
+export const MIN_SOURCE_FILE_CHARS = 40;
+
 /* ---------------------------------------------------------------- session -- */
 
 export const GROUP_SIZE = 5;
@@ -98,9 +163,6 @@ export const SAMPLE_BOOST_THRESHOLD = 10;
  * least, which is exactly backwards.
  */
 export const UNSEEN_WEIGHT = 0.16;
-
-/** Only observed bigrams compete: 676 unobserved ones would swamp the candidate pool. */
-export const MIN_OBSERVED_BIGRAM_ATTEMPTS = 1;
 
 /** 85% of draws follow the weights, 15% are uniform so no unit can starve. */
 export const EXPLORATION_SHARE = 0.15;

@@ -42,8 +42,9 @@ describe('adaptive sampling constants', () => {
     expect(config.SESSION_UNIT_DECAY).toBeLessThan(1);
   });
 
-  it('only counts bigrams that have actually been seen', () => {
-    expect(config.MIN_OBSERVED_BIGRAM_ATTEMPTS).toBeGreaterThanOrEqual(1);
+  it('keeps the minimum run length short enough to still be useful', () => {
+    expect(config.MIN_SOURCE_RUN_CHARS).toBeGreaterThanOrEqual(1);
+    expect(config.MIN_SOURCE_RUN_CHARS).toBeLessThanOrEqual(config.MAX_SOURCE_RUN_CHARS);
   });
 
   it('starts from the home row and leans away from Shift', () => {
@@ -99,14 +100,23 @@ describe('persistence limits', () => {
     expect(config.MAX_IMPORT_CHARS).toBeLessThan(100_000_000);
   });
 
-  it('namespaces the storage keys', () => {
-    expect(config.STORAGE_KEY.startsWith('yskeys:')).toBe(true);
-    expect(config.BACKUP_KEY_PREFIX.startsWith('yskeys:')).toBe(true);
-    expect(config.CORRUPT_KEY_PREFIX.startsWith('yskeys:')).toBe(true);
+  it('namespaces the storage keys, and gives the assets their own', () => {
+    for (const key of [
+      config.STORAGE_KEY,
+      config.BACKUP_KEY_PREFIX,
+      config.CORRUPT_KEY_PREFIX,
+      config.WORDLIST_KEY,
+      config.TEXTSOURCE_KEY,
+    ]) {
+      expect(key.startsWith('yskeys:')).toBe(true);
+    }
+    // An asset must never share a key with history, or pruning could delete it.
+    expect(new Set([config.STORAGE_KEY, config.WORDLIST_KEY, config.TEXTSOURCE_KEY]).size).toBe(3);
   });
 
-  it('hides noisy trigrams from the UI without refusing to store them', () => {
-    expect(config.TRIGRAM_DISPLAY_MIN_ATTEMPTS).toBeGreaterThanOrEqual(2);
+  it('bounds the text source independently of the store budget', () => {
+    expect(config.MAX_SOURCE_TEXT_CHARS).toBeLessThan(config.MAX_TEXTSOURCE_CHARS);
+    expect(config.MAX_ZIP_BYTES).toBeGreaterThan(1_000_000);
   });
 
   it('offers bounded table and chart sizes', () => {

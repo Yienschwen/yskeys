@@ -16,8 +16,6 @@ export interface Metric {
 
 export interface SessionTally {
   unigrams: Record<string, Metric>;
-  bigrams: Record<string, Metric>;
-  trigrams: Record<string, Metric>;
   /** Bucketed by the keyboard layout: finger, hand, Shift state, character kind. */
   byFinger: Record<string, Metric>;
   byHand: Record<string, Metric>;
@@ -32,7 +30,6 @@ export interface SessionTally {
 
 export interface WeakUnit {
   readonly unit: string;
-  readonly kind: 'uni' | 'bi';
   readonly metric: Metric;
   readonly accuracy: number;
   readonly errors: number;
@@ -86,18 +83,16 @@ export function mergeMetricMaps(
 }
 
 /**
- * Folds a session's locked first attempts into every dimension the history view
- * needs: single characters, adjacent pairs, adjacent triples, and the finger, hand,
- * Shift and character-kind buckets from the keyboard layout.
+ * Folds a session's locked first attempts into every dimension the history view needs:
+ * single characters, and the finger, hand, Shift and character-kind buckets from the
+ * keyboard layout.
  *
- * n-gram rule (PROJECT.md §6.3): an n-gram counts once, and counts as correct only if
- * EVERY position in it was correct on its first attempt. Re-typing after a Backspace
- * cannot create a second sample, because `firstAttempt` is immutable.
+ * Per-position rule: a position counts once, and `firstAttempt` is immutable, so
+ * re-typing after a Backspace cannot create a second sample. Newlines are characters
+ * like any other and end up under `byKind['control']` and the Enter finger.
  */
 export function tallySession(state: SessionState): SessionTally {
   const unigrams: Record<string, Metric> = {};
-  const bigrams: Record<string, Metric> = {};
-  const trigrams: Record<string, Metric> = {};
   const byFinger: Record<string, Metric> = {};
   const byHand: Record<string, Metric> = {};
   const byShifted: Record<string, Metric> = {};
@@ -136,43 +131,8 @@ export function tallySession(state: SessionState): SessionTally {
     }
   }
 
-  for (let index = 0; index < state.target.length - 1; index += 1) {
-    const first = state.firstAttempt[index];
-    const second = state.firstAttempt[index + 1];
-    if (first === undefined || second === undefined) {
-      continue;
-    }
-    const expectedFirst = state.target.charAt(index);
-    const expectedSecond = state.target.charAt(index + 1);
-    const pair = expectedFirst + expectedSecond;
-    const correct = first === expectedFirst && second === expectedSecond;
-    bigrams[pair] = recordAttempt(bigrams[pair] ?? emptyMetric(), first + second, correct);
-  }
-
-  for (let index = 0; index < state.target.length - 2; index += 1) {
-    const first = state.firstAttempt[index];
-    const second = state.firstAttempt[index + 1];
-    const third = state.firstAttempt[index + 2];
-    if (first === undefined || second === undefined || third === undefined) {
-      continue;
-    }
-    const expectedFirst = state.target.charAt(index);
-    const expectedSecond = state.target.charAt(index + 1);
-    const expectedThird = state.target.charAt(index + 2);
-    const triple = expectedFirst + expectedSecond + expectedThird;
-    const correct =
-      first === expectedFirst && second === expectedSecond && third === expectedThird;
-    trigrams[triple] = recordAttempt(
-      trigrams[triple] ?? emptyMetric(),
-      first + second + third,
-      correct,
-    );
-  }
-
   return {
     unigrams,
-    bigrams,
-    trigrams,
     byFinger,
     byHand,
     byShifted,
@@ -284,19 +244,6 @@ export function weakestUnits(tally: SessionTally, limit: number): WeakUnit[] {
     if (errors > 0) {
       candidates.push({
         unit,
-        kind: 'uni',
-        metric,
-        accuracy: metric.firstTryCorrect / metric.attempts,
-        errors,
-      });
-    }
-  }
-  for (const [unit, metric] of Object.entries(tally.bigrams)) {
-    const errors = errorsIn(metric);
-    if (errors > 0) {
-      candidates.push({
-        unit,
-        kind: 'bi',
         metric,
         accuracy: metric.firstTryCorrect / metric.attempts,
         errors,

@@ -29,7 +29,7 @@ export interface LoadResult {
 
 export interface SaveResult {
   ok: boolean;
-  /** How many trigram/bigram units had to be dropped to fit the budget. */
+  /** How many least-practised units had to be dropped to fit the budget. */
   pruned: number;
   reason?: string;
 }
@@ -94,38 +94,43 @@ export function saveStore(storage: StorageLike, store: Store): SaveResult {
 }
 
 /**
- * Drops the weakest units until the payload fits. Trigrams go first, and each pass
- * removes the lowest-attempt half rather than one unit at a time, because re-measuring
- * a multi-megabyte string per unit would be slow enough to notice.
+ * Shrinks a payload that is over budget, cheapest evidence first.
+ *
+ * Session summaries are history you can still export, so they go first — newest kept,
+ * halves dropped per pass. The per-character counters are the only thing adaptive
+ * weighting reads, so they are trimmed last, and only once there is nothing else left.
+ * Every pass removes at least one whole entry, so `JSON.stringify` strictly shrinks and
+ * the loop terminates even when nothing it can drop is big enough.
+ *
+ * Re-measuring per entry would be quadratic on a multi-megabyte string, hence halves.
  */
 export function enforceBudget(text: string, store: Store): { store: Store; dropped: number } {
   let current = store;
   let dropped = 0;
   let size = text.length;
 
-  for (const dimension of ['trigrams', 'bigrams'] as const) {
-    while (size > MAX_PAYLOAD_CHARS) {
-      const map = current.aggregates[dimension];
-      const units = Object.keys(map).length;
-      if (units === 0) {
-        break;
-      }
-      const sorted = Object.entries(map).sort((a, b) => a[1].attempts - b[1].attempts);
-      const dropCount = Math.max(1, Math.ceil(sorted.length / 2));
-      const kept: Record<string, Metric> = {};
-      for (const [unit, metric] of sorted.slice(dropCount)) {
-        kept[unit] = metric;
-      }
-      dropped += dropCount;
-      current = {
-        ...current,
-        aggregates: { ...current.aggregates, [dimension]: kept },
-      };
-      size = JSON.stringify(current).length;
-    }
-    if (size <= MAX_PAYLOAD_CHARS) {
+  while (size > MAX_PAYLOAD_CHARS && current.sessions.length > 0) {
+    const keep = Math.max(0, Math.floor(current.sessions.length / 2));
+    dropped += current.sessions.length - keep;
+    current = { ...current, sessions: current.sessions.slice(0, keep) };
+    size = JSON.stringify(current).length;
+  }
+
+  while (size > MAX_PAYLOAD_CHARS) {
+    const map = current.aggregates.unigrams;
+    const units = Object.keys(map).length;
+    if (units === 0) {
       break;
     }
+    const sorted = Object.entries(map).sort((a, b) => a[1].attempts - b[1].attempts);
+    const dropCount = Math.max(1, Math.ceil(sorted.length / 2));
+    const kept: Record<string, Metric> = {};
+    for (const [unit, metric] of sorted.slice(dropCount)) {
+      kept[unit] = metric;
+    }
+    dropped += dropCount;
+    current = { ...current, aggregates: { ...current.aggregates, unigrams: kept } };
+    size = JSON.stringify(current).length;
   }
 
   return { store: current, dropped };

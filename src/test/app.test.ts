@@ -232,14 +232,13 @@ describe('app wiring', () => {
     }
 
     const rows = root.querySelectorAll('tbody tr');
-    expect(rows).toHaveLength(2);
+    // Exactly one unit was missed: the first character. Pairs are no longer recorded,
+    // so nothing else can appear here.
+    expect(rows).toHaveLength(1);
     const units = [...root.querySelectorAll('tbody tr .table__unit')].map(
       (element) => element.textContent,
     );
-    // Both the character and the pair it was part of were missed once. Order is
-    // by error count then accuracy, so the 0%-accuracy pair ranks first.
-    expect(units).toContain(expected.charAt(0));
-    expect(units).toContain(expected.slice(0, 2));
+    expect(units).toEqual([expected.charAt(0)]);
   });
 
   it('replays through the Again button', () => {
@@ -352,6 +351,8 @@ describe('persistence, settings and history', () => {
       groupCount: 30,
       shape: 'words',
       mode: 'adaptive',
+      spaceDisplay: 'bar',
+      nextKey: true,
     });
 
     expect(app?.undoReplace()).toBe(true);
@@ -424,12 +425,15 @@ describe('persistence, settings and history', () => {
       groupCount: 30,
       shape: 'words',
       mode: 'adaptive',
+      spaceDisplay: 'bar',
+      nextKey: true,
     });
   });
 });
 
 /** 26 distinct three-letter words: enough for the words shape to be offered. */
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+
 const LIST_WORDS = Array.from(
   { length: 30 },
   (_, index) =>
@@ -479,7 +483,7 @@ describe('word list and drill shape', () => {
     expect(app.wordList()?.name).toBe('test.txt');
   });
 
-  it('falls back to characters when a non-letter charset is enabled', () => {
+  it('falls back to random characters when a non-letter charset rules out words', () => {
     const { root } = mountWithStorage();
     app?.importWordListText(LIST_TEXT, 'test.txt');
     app?.changeSettings({ charsets: ['lowercase', 'digits'], groupCount: 30, shape: 'words' });
@@ -494,7 +498,7 @@ describe('word list and drill shape', () => {
   it('goes back to random characters when the shape is set to uniform', () => {
     const { root } = mountWithStorage();
     app?.importWordListText(LIST_TEXT, 'test.txt');
-    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform', mode: 'uniform' });
+    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'patterns', mode: 'uniform' });
     app?.newSession();
 
     const drill = targetOf(root);
@@ -557,10 +561,177 @@ describe('word list and drill shape', () => {
     finishDrill(root);
     expect(app?.store().sessions[0]?.shape).toBe('words');
 
-    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'uniform', mode: 'uniform' });
+    app?.changeSettings({ charsets: ['lowercase'], groupCount: 30, shape: 'patterns', mode: 'uniform' });
     app?.newSession();
     finishDrill(root);
-    expect(app?.store().sessions[0]?.shape).toBe('uniform');
+    expect(app?.store().sessions[0]?.shape).toBe('patterns');
+  });
+});
+
+describe('space marker and finger hint', () => {
+  it('marks the drill with the chosen space style and keeps every space a target', () => {
+    const { root } = mountWithStorage();
+    expect(root.querySelector('.drill')?.getAttribute('data-space')).toBe('bar');
+
+    app?.changeSettings({ ...(app?.settings() as Settings), spaceDisplay: 'dot' });
+    app?.newSession();
+
+    expect(root.querySelector('.drill')?.getAttribute('data-space')).toBe('dot');
+    expect(root.querySelectorAll('.ch--space').length).toBeGreaterThan(10);
+  });
+
+  it('names the next key and its finger, and follows the cursor', () => {
+    const { root } = mountWithStorage();
+    expect(root.querySelector('.finger')).not.toBeNull();
+    expect(root.querySelector('.finger__label')?.textContent).toContain('Next:');
+
+    const first = targetOf(root).charAt(0);
+    const marked = root.querySelector('.finger__key.is-next');
+    expect(marked?.getAttribute('data-char')).toBe(first);
+
+    press(first);
+    const next = targetOf(root).charAt(1);
+    expect(root.querySelector('.finger__key.is-next')?.getAttribute('data-char')).toBe(next);
+  });
+
+  it('hides the hint panel when the setting is off', () => {
+    const { root } = mountWithStorage();
+    app?.changeSettings({ ...(app?.settings() as Settings), nextKey: false });
+    app?.newSession();
+
+    expect(root.querySelector('.finger')).toBeNull();
+  });
+});
+
+describe('text and code source', () => {
+  const SOURCE = 'let total = 1;\nfor (const n of list) {\n  total += n;\n}\n';
+  const ALL = ['lowercase', 'uppercase', 'digits', 'punctuation', 'symbols'] as const;
+
+  function mountWithSource(): HTMLElement {
+    const { root } = mountWithStorage();
+    const imported = app?.importPastedText(SOURCE, 'snippet');
+    expect(imported?.ok).toBe(true);
+    app?.changeSettings({ charsets: [...ALL], groupCount: 15, shape: 'text', mode: 'adaptive' });
+    app?.newSession();
+    return root;
+  }
+
+  it('drills only text that came from the source, line breaks included', () => {
+    const root = mountWithSource();
+    const state = app?.state();
+    if (!state) {
+      throw new Error('no session');
+    }
+    const target = state.target;
+
+    expect(target.length).toBeGreaterThan(0);
+    // Adaptive mode draws chunks in a weighted order, so the target is not a prefix of
+    // the source — but every character in it must be one the source actually contains.
+    expect([...target].every((char) => SOURCE.includes(char))).toBe(true);
+    expect(target).toContain('\n');
+
+    // One span per target character, and one line-break span per newline target.
+    expect(chars(root)).toHaveLength(target.length);
+    expect(root.querySelectorAll('.ch--newline').length).toBe(
+      [...target].filter((char) => char === '\n').length,
+    );
+  });
+
+  it('uses the source line structure rather than inventing it', () => {
+    const root = mountWithSource();
+    const target = app?.state().target ?? '';
+    // Every chunk boundary in the target is a space the drill expects, and the line
+    // breaks are exactly the ones the source had.
+    expect(root.querySelectorAll('.ch--newline').length).toBeGreaterThan(0);
+    expect(target.replaceAll('\n', '').length).toBeGreaterThan(0);
+  });
+
+  it('accepts Enter where the drill expects a newline', () => {
+    mountWithSource();
+    const target = app?.state().target ?? '';
+    const firstBreak = target.indexOf('\n');
+    expect(firstBreak).toBeGreaterThan(0);
+
+    for (const char of target.slice(0, firstBreak)) {
+      press(char);
+    }
+    expect(app?.state().typed).toBe(target.slice(0, firstBreak));
+
+    press('Enter');
+    expect(app?.state().typed).toBe(target.slice(0, firstBreak + 1));
+    expect(app?.state().firstAttempt[firstBreak]).toBe('\n');
+  });
+
+  it('leaves Enter to the browser when the drill does not expect a newline', () => {
+    const { root } = mountWithStorage();
+    expect(app?.state().target).not.toContain('\n');
+    expect(root.querySelectorAll('.ch--newline')).toHaveLength(0);
+
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(app?.state().typed).toBe('');
+  });
+
+  it('keeps the source across a clear and reports it in history', () => {
+    const root = mountWithSource();
+    expect(app?.textSource()?.text).toContain('let total = 1;');
+
+    app?.clearAll();
+    expect(app?.textSource()?.name).toBe('snippet');
+
+    app?.showHistory();
+    expect(root.textContent).toContain('snippet');
+    expect(root.textContent).toContain('Remove text source');
+  });
+
+  it('removes the source on request', () => {
+    const root = mountWithSource();
+    app?.removeTextSource();
+
+    expect(app?.textSource()).toBeNull();
+    app?.showHistory();
+    expect(root.textContent).toContain('No text source yet');
+  });
+
+  it('carries the source through an export and import', () => {
+    mountWithSource();
+    const text = app?.exportText() ?? '';
+
+    app?.removeTextSource();
+    expect(app?.textSource()).toBeNull();
+
+    const imported = app?.importText(text, 'replace');
+    expect(imported?.ok).toBe(true);
+    expect(app?.textSource()?.name).toBe('snippet');
+    expect(app?.textSource()?.text).toContain('for (const n of list)');
+  });
+
+  it('reads a .zip that is not really an archive as plain text', async () => {
+    mountWithStorage();
+    app?.changeSettings({ charsets: [...ALL], groupCount: 15, shape: 'text' });
+
+    const notAnArchive = new File(
+      ['const answer to everything is forty two and some more words here\n'],
+      'notes.zip',
+      { type: 'application/zip' },
+    );
+    const result = await app?.importTextSourceFiles([notAnArchive]);
+
+    expect(result?.ok).toBe(true);
+    expect(app?.textSource()?.name).toBe('notes.zip');
+    expect(app?.textSource()?.text).toContain('const answer');
+  });
+
+  it('refuses a paste that the enabled sets cannot type, and names them', () => {
+    const { root } = mountWithStorage();
+    app?.changeSettings({ charsets: ['digits'], groupCount: 30 });
+
+    const rejected = app?.importPastedText('中文中文中文中文中文中文', 'cjk');
+    expect(rejected?.ok).toBe(false);
+    expect(app?.textSource()).toBeNull();
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain('digits');
   });
 });
 
@@ -596,7 +767,7 @@ describe('adaptive weighting', () => {
       schemaVersion: 1,
       exportedAt: 1,
       app: { version: '0' },
-      settings: { charsets: ['lowercase'], groupCount: 30, shape: 'uniform', mode: 'adaptive' },
+      settings: { charsets: ['lowercase'], groupCount: 30, shape: 'patterns', mode: 'adaptive' },
       aggregates: {
         schemaVersion: 1,
         createdAt: 1,
@@ -631,7 +802,7 @@ describe('adaptive weighting', () => {
     app?.changeSettings({
       charsets: ['lowercase'],
       groupCount: 30,
-      shape: 'uniform',
+      shape: 'patterns',
       mode: 'uniform',
     });
     app?.newSession();

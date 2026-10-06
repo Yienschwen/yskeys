@@ -121,29 +121,21 @@ describe('median', () => {
 });
 
 describe('tallySession', () => {
-  it('counts every unigram and every adjacent bigram once', () => {
+  it('counts every character once', () => {
     const tally = tallySession(play('abcde', ['a', 'b', 'c', 'd', 'e']));
     expect(tally.totals).toEqual({ attempts: 5, firstTryCorrect: 5, backspaces: 0 });
     for (const char of 'abcde') {
       expect(tally.unigrams[char]).toEqual(metric(1, 1));
     }
-    expect(Object.keys(tally.bigrams).sort()).toEqual(['ab', 'bc', 'cd', 'de']);
-    expect(tally.bigrams['ab']).toEqual(metric(1, 1));
+    expect(Object.keys(tally.unigrams).sort()).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 
   it('files a miss under the expected unit, with what was actually typed', () => {
     const tally = tallySession(play('abcde', ['a', 'x', 'c']));
     expect(tally.unigrams['b']).toEqual(metric(1, 0, { x: 1 }));
     expect(tally.unigrams['a']).toEqual(metric(1, 1));
+    expect(tally.unigrams['x']).toBeUndefined();
     expect(tally.totals).toEqual({ attempts: 3, firstTryCorrect: 2, backspaces: 0 });
-    // A bigram is wrong if either half is wrong.
-    expect(tally.bigrams['ab']).toEqual(metric(1, 0, { ax: 1 }));
-    expect(tally.bigrams['bc']).toEqual(metric(1, 0, { xc: 1 }));
-  });
-
-  it('counts a bigram only when both positions were attempted', () => {
-    const tally = tallySession(play('abcde', ['a', 'b']));
-    expect(Object.keys(tally.bigrams)).toEqual(['ab']);
   });
 
   it('does not create a second sample when a position is retyped', () => {
@@ -160,7 +152,7 @@ describe('tallySession', () => {
     const tally = tallySession(createSession({ target: 'abc', groupSize: 3 }));
     expect(tally.totals.attempts).toBe(0);
     expect(tally.unigrams).toEqual({});
-    expect(tally.bigrams).toEqual({});
+    expect(tally.byFinger).toEqual({});
   });
 });
 
@@ -171,45 +163,44 @@ describe('weakestUnits', () => {
 
   it('excludes units that were never missed', () => {
     const tally = tallySession(play('aab', ['x', 'y', 'b']));
-    // 'b' was typed correctly and must not be listed; 'a', 'aa' and 'ab' were missed.
+    // 'b' was typed correctly and must not be listed; 'a' was missed twice.
     expect(tally.unigrams['b']).toEqual(metric(1, 1));
     const units = weakestUnits(tally, 10);
-    expect(units.map((unit) => unit.unit)).toEqual(['a', 'aa', 'ab']);
+    expect(units.map((unit) => unit.unit)).toEqual(['a']);
     expect(units.some((unit) => unit.unit === 'b')).toBe(false);
   });
 
   it('puts the unit with the most errors first', () => {
-    const units = weakestUnits(tallySession(play('aab', ['x', 'y', 'b'])), 3);
-    expect(units[0]?.unit).toBe('a');
-    expect(units[0]?.errors).toBe(2);
-    expect(units[0]?.kind).toBe('uni');
+    const units = weakestUnits(
+      tallySession(play('abc', ['a', 'x', 'y'])),
+      3,
+    );
+    expect(units.map((unit) => unit.unit).sort()).toEqual(['b', 'c']);
+    expect(units[0]?.errors).toBe(1);
   });
 
-  it('respects the limit and labels bigrams', () => {
-    const units = weakestUnits(tallySession(play('ab', ['x', 'y'])), 3);
-    expect(units).toHaveLength(3);
-    expect(units.filter((unit) => unit.kind === 'bi').map((unit) => unit.unit)).toEqual(['ab']);
+  it('treats a separator and a newline as units like any other', () => {
+    // Only the space and the newline are missed: 'x' where a space was expected, and
+    // 'a' where the newline was.
+    const tally = tallySession(play('a b\nc', ['a', 'x', 'b', 'a', 'c']));
+    const units = weakestUnits(tally, 10).map((unit) => unit.unit);
+
+    expect(tally.unigrams[' ']).toEqual(metric(1, 0, { x: 1 }));
+    expect(tally.unigrams['\n']).toEqual(metric(1, 0, { a: 1 }));
+    expect(units).toEqual([' ', '\n']);
   });
 
   it('never returns more than the limit', () => {
-    expect(weakestUnits(tallySession(play('ab', ['x', 'y'])), 1)).toHaveLength(1);
+    expect(weakestUnits(tallySession(play('abc', ['x', 'y', 'z'])), 1)).toHaveLength(1);
   });
 });
 
 describe('tallySession dimensions', () => {
-  it('counts every adjacent triple once', () => {
-    const tally = tallySession(play('abcde', ['a', 'b', 'c', 'd', 'e']));
-    expect(Object.keys(tally.trigrams).sort()).toEqual(['abc', 'bcd', 'cde']);
-    expect(tally.trigrams['abc']).toEqual(metric(1, 1));
-  });
-
-  it('needs all three positions before a triple counts', () => {
-    expect(Object.keys(tallySession(play('abcde', ['a', 'b'])).trigrams)).toEqual([]);
-  });
-
-  it('fails a triple when any one of its positions was missed', () => {
-    const tally = tallySession(play('abc', ['a', 'x', 'c']));
-    expect(tally.trigrams['abc']).toEqual(metric(1, 0, { axc: 1 }));
+  it('records no pair or triple at all, because units are single characters', () => {
+    const tally = tallySession(play('abc', ['a', 'b', 'c']));
+    const keys = Object.keys(tally);
+    expect(keys).not.toContain('bigrams');
+    expect(keys).not.toContain('trigrams');
   });
 
   it('buckets by finger, hand, shift state and character kind', () => {
@@ -247,11 +238,16 @@ describe('tallySession dimensions', () => {
     expect(sum(tally.byShifted)).toBe(6);
   });
 
-  it('leaves the new dimensions empty for an untouched session', () => {
+  it('leaves the layout dimensions empty for an untouched session', () => {
     const tally = tallySession(createSession({ target: 'abc', groupSize: 3 }));
-    expect(tally.trigrams).toEqual({});
     expect(tally.byKind).toEqual({});
     expect(tally.byFinger).toEqual({});
+  });
+
+  it('files a newline under the Enter finger and the control kind', () => {
+    const tally = tallySession(play('a\nb', ['a', '\n', 'b']));
+    expect(tally.byKind['control']).toEqual(metric(1, 1));
+    expect(tally.byFinger['r-pinky']).toEqual(metric(1, 1));
   });
 });
 

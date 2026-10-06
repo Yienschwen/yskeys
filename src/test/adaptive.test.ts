@@ -19,10 +19,9 @@ function metric(attempts: number, correct: number): Metric {
 
 function source(
   unigrams: Record<string, Metric>,
-  bigrams: Record<string, Metric> = {},
   charsets: readonly string[] = ['lowercase'],
 ): AdaptiveSource {
-  return { unigrams, bigrams, charsets: charsets as AdaptiveSource['charsets'] };
+  return { unigrams, charsets: charsets as AdaptiveSource['charsets'] };
 }
 
 /**
@@ -84,24 +83,20 @@ describe('candidates', () => {
     expect(byUnit.get('b') ?? 0).toBeLessThan(UNSEEN_WEIGHT);
   });
 
-  it('only lets bigrams that have actually been observed compete', () => {
-    const pool = measuredCandidates(
-      source({ a: metric(5, 5) }, { ab: metric(0, 0), ac: metric(2, 1) }),
-      new Set(['a', 'b', 'c', 'ab', 'ac']),
-    );
-    expect(pool.filter((candidate) => candidate.kind === 'bi').map((c) => c.unit)).toEqual(['ac']);
+  it('offers only single characters, never a pair', () => {
+    const pool = measuredCandidates(source({ a: metric(5, 5) }), new Set(['a', 'b']));
+    expect(pool.map((candidate) => candidate.unit).sort()).toEqual(['a', 'b']);
+    expect(pool.every((candidate) => candidate.unit.length === 1)).toBe(true);
   });
 
   it('ignores units the enabled charsets cannot type', () => {
-    const pool = measuredCandidates(
-      source({ A: metric(3, 0) }, { aB: metric(3, 0) }, ['lowercase']),
-    );
+    const pool = measuredCandidates(source({ A: metric(3, 0) }, ['lowercase']));
     expect(pool.every((candidate) => candidate.unit === candidate.unit.toLowerCase())).toBe(true);
     expect(pool.map((candidate) => candidate.unit)).not.toContain('A');
   });
 
   it('honours the availability filter, which is how un-drillable units stay out', () => {
-    const pool = measuredCandidates(source({ a: metric(5, 0) }, {}, ['lowercase']), new Set(['a']));
+    const pool = measuredCandidates(source({ a: metric(5, 0) }, ['lowercase']), new Set(['a']));
     expect(pool.map((candidate) => candidate.unit)).toEqual(['a']);
   });
 });
@@ -109,9 +104,8 @@ describe('candidates', () => {
 describe('cold start', () => {
   it('is detected only when nothing at all has been recorded', () => {
     expect(isColdStart(source({ a: metric(0, 0) }))).toBe(true);
-    expect(isColdStart(source({}, { ab: metric(0, 0) }))).toBe(true);
     expect(isColdStart(source({ a: metric(1, 0) }))).toBe(false);
-    expect(isColdStart(source({}, { ab: metric(1, 1) }))).toBe(false);
+    expect(isColdStart(source({ b: metric(1, 1) }))).toBe(false);
   });
 
   it('walks outwards from the home row', () => {
@@ -123,10 +117,8 @@ describe('cold start', () => {
     expect(byUnit.get('v') ?? 0).toBeGreaterThan(byUnit.get('1') ?? 0);
   });
 
-  it('offers only single characters, since no pair has any evidence yet', () => {
-    expect(coldStartCandidates(['lowercase']).every((candidate) => candidate.kind === 'uni')).toBe(
-      true,
-    );
+  it('offers only single characters, since a pair is not a unit at all', () => {
+    expect(coldStartCandidates(['lowercase']).every((c) => c.unit.length === 1)).toBe(true);
   });
 
   it('leans away from Shift', () => {

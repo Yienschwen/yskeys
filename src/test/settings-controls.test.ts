@@ -3,16 +3,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultSettings } from '../store/schema';
 import type { Settings } from '../store/schema';
 import { createSettingsControls } from '../ui/settings-controls';
+import type { ShapeAvailability } from '../ui/settings-controls';
 
 afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function mount(initial: Settings = defaultSettings(), words = { available: true, hint: '' }) {
+const ALL_SHAPES: Record<'words' | 'text' | 'patterns', ShapeAvailability> = {
+  words: { available: true, hint: '' },
+  text: { available: true, hint: '' },
+  patterns: { available: true, hint: '' },
+};
+
+function mount(
+  initial: Settings = defaultSettings(),
+  shapes: Partial<Record<'words' | 'text' | 'patterns', ShapeAvailability>> = {},
+) {
   const onChange = vi.fn();
   const controls = createSettingsControls(initial, onChange, {
-    wordsAvailable: words.available,
-    wordsHint: words.hint,
+    shapes: { ...ALL_SHAPES, ...shapes },
   });
   document.body.append(controls.element);
   return { controls, onChange };
@@ -55,6 +64,8 @@ describe('settings controls', () => {
       groupCount: 30,
       shape: 'words',
       mode: 'adaptive',
+      spaceDisplay: 'bar',
+      nextKey: true,
     });
     expect(pill(controls.element, 'A–Z').getAttribute('aria-pressed')).toBe('true');
   });
@@ -69,6 +80,8 @@ describe('settings controls', () => {
       groupCount: 30,
       shape: 'words',
       mode: 'adaptive',
+      spaceDisplay: 'bar',
+      nextKey: true,
     });
     expect(pill(controls.element, 'a–z').getAttribute('aria-pressed')).toBe('false');
   });
@@ -108,6 +121,8 @@ describe('settings controls', () => {
       groupCount: 60,
       shape: 'words',
       mode: 'adaptive',
+      spaceDisplay: 'bar',
+      nextKey: true,
     });
   });
 
@@ -135,23 +150,28 @@ describe('settings controls', () => {
     expect(controls.element.querySelector('select')?.value).toBe('15');
   });
 
-  it('reports a shape change', () => {
+  it('offers all three drill shapes and reports a change', () => {
     const { controls, onChange } = mount();
-    segment(controls.element, 'Characters').click();
+    for (const label of ['Words', 'Text / code', 'Patterns']) {
+      expect(segment(controls.element, label)).toBeDefined();
+    }
+
+    segment(controls.element, 'Patterns').click();
 
     expect(onChange).toHaveBeenCalledWith({
       charsets: ['lowercase'],
       groupCount: 30,
-      shape: 'uniform',
+      shape: 'patterns',
       mode: 'adaptive',
+      spaceDisplay: 'bar',
+      nextKey: true,
     });
-    expect(segment(controls.element, 'Characters').getAttribute('aria-pressed')).toBe('true');
+    expect(segment(controls.element, 'Patterns').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('disables the words option and shows why when no list is usable', () => {
     const { controls, onChange } = mount(defaultSettings(), {
-      available: false,
-      hint: 'Import a word list in History',
+      words: { available: false, hint: 'Import a word list in History' },
     });
     const words = segment(controls.element, 'Words');
 
@@ -163,11 +183,57 @@ describe('settings controls', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('picks the words state up later, once a list arrives', () => {
-    const { controls } = mount(defaultSettings(), { available: false, hint: 'no list' });
-    controls.setWordsState(true, '');
+  it('picks a shape state up later, once the material arrives', () => {
+    // 'text' has to be the selected shape for its hint to be worth showing.
+    const { controls } = mount(
+      { ...defaultSettings(), shape: 'text' },
+      { text: { available: false, hint: 'no text source' } },
+    );
+    expect(segment(controls.element, 'Text / code').disabled).toBe(true);
+    expect(controls.element.textContent).toContain('no text source');
 
-    expect(segment(controls.element, 'Words').disabled).toBe(false);
-    expect(controls.element.textContent).not.toContain('no list');
+    controls.setShapeState('text', true, '');
+
+    expect(segment(controls.element, 'Text / code').disabled).toBe(false);
+    expect(controls.element.textContent).not.toContain('no text source');
+  });
+
+  it('offers every space marker and reports the choice', () => {
+    const { controls, onChange } = mount();
+    const labels = ['Blank', 'Dot', 'Bar', 'Dash'];
+    for (const label of labels) {
+      expect(segment(controls.element, label)).toBeDefined();
+    }
+    // Bar is the default.
+    expect(segment(controls.element, 'Bar').getAttribute('aria-pressed')).toBe('true');
+
+    segment(controls.element, 'Dot').click();
+
+    expect(onChange).toHaveBeenCalledWith({
+      charsets: ['lowercase'],
+      groupCount: 30,
+      shape: 'words',
+      mode: 'adaptive',
+      spaceDisplay: 'dot',
+      nextKey: true,
+    });
+    expect(segment(controls.element, 'Dot').getAttribute('aria-pressed')).toBe('true');
+    expect(segment(controls.element, 'Bar').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('toggles the finger hint on and off', () => {
+    const { controls, onChange } = mount();
+    expect(segment(controls.element, 'Finger hint').getAttribute('aria-pressed')).toBe('true');
+
+    segment(controls.element, 'Hidden').click();
+
+    expect(onChange).toHaveBeenCalledWith({
+      charsets: ['lowercase'],
+      groupCount: 30,
+      shape: 'words',
+      mode: 'adaptive',
+      spaceDisplay: 'bar',
+      nextKey: false,
+    });
   });
 });

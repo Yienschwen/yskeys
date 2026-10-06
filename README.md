@@ -1,9 +1,8 @@
 # yskeys
 
-A static typing trainer that drills your weakest characters and letter pairs.
-No backend: history lives in `localStorage` and can be exported to, and reloaded from, a local JSON file.
-
-**Status: M0** — build pipeline, design tokens and the app shell only. The typing engine lands in M1.
+A static typing trainer that drills the characters you miss and shows which finger to reach with.
+Drill a word list, or your own code and text. No backend: history lives in `localStorage` and can be
+exported to, and reloaded from, a local JSON file.
 
 - Scope and MVP definition → [`PROJECT.md`](./PROJECT.md)
 - Visual and interaction rules → [`DESIGN.md`](./DESIGN.md)
@@ -55,10 +54,32 @@ Then:
 The base path `/yskeys/` is set in `vite.config.ts` and **must match the repository name**,
 otherwise every built asset 404s on the Pages subpath.
 
-## Word list
+## Practice material
 
-Real-word drills need a list, and **none is bundled**: download one and import it via
-**History → Word list → Import**. Nothing is ever fetched over the network.
+Three shapes, in the header: **Words**, **Text / code** and **Patterns**. Patterns are random
+character groups and always work; the other two need something to practise, and **nothing is
+bundled** — you bring the file, and nothing is ever fetched over the network.
+
+### Text and code
+
+**History → Text or code**: **Upload repository (.zip)**, **Upload text or code files** for a
+handful of plain-text files, or paste a snippet into the box.
+
+- A repository archive is read **in the browser** and decompressed with the platform's own
+  `DecompressionStream` — there is no zip library in this project, by design. Known source
+  extensions are kept; `node_modules`, `dist`, `build`, lockfiles, VCS directories and binaries are
+  skipped, and the import report says how many files were dropped.
+- Text is cut into chunks at token boundaries — never mid-word — and **line breaks are kept as real
+  targets**: the drill preserves your code's shape and you type `Enter` where the source has one.
+- Only the characters your enabled character sets can produce survive. Enable `symbols` and
+  `punctuation` before importing code, or the drill will be letters only; the import tells you how
+  much it kept.
+- The first 200,000 characters are kept. The source lives under its own `localStorage` key, so
+  history pruning never touches it and **Clear all data** keeps it — same as the word list.
+
+### Word list
+
+Real-word drills need a list: download one and import it via **History → Word list → Import**.
 
 Recommended sources, with figures measured from the actual files:
 
@@ -79,17 +100,30 @@ Worth knowing:
 - **Use a frequency-ordered list, not a dictionary.** Rare words make poor practice material.
 - Words with hyphens (EFF has four: `drop-down`, `felt-tip`, `t-shirt`, `yo-yo`) are kept by the
   importer but never used by the letter-only word drill.
-- The words shape needs **letter-only character sets**. Enable digits or symbols and drills fall back
-  to random character groups, because a word list cannot express them.
+- The words shape needs **letter-only character sets**. Enable digits or symbols and words cannot
+  express them, so the drill falls back to the next available shape rather than refusing to start.
 - A word list is an asset, not history: **Clear all data** deliberately keeps it, and so does history
   pruning.
+
+## Reading the drill
+
+- The **space** between chunks is a target, not a gap. How it is drawn is yours to choose in the
+  header: **Bar** (default), **Blank**, **Dot** or **Dash**.
+- The **finger hint** (on by default) names the finger for the next key and lights it up on a US
+  QWERTY diagram. Shifted characters say which little finger holds Shift. Turn it off in the header.
+- In a text/code drill a **newline is a target**: the drill ends the line and you press `Enter`.
 
 ## Data
 
 Nothing is uploaded and there is no analytics. Typing history stays in this browser's
-`localStorage`; export/import (JSON) is in the History view. See `PROJECT.md` §4 for what this
+`localStorage`; export/import (JSON) is in the History view. An export carries your word list and
+text source too, so one file is a complete backup. See `PROJECT.md` §4 for what this
 project deliberately does not do.
 
 **Use one origin consistently.** The custom domain answers on both `http://` and `https://`, and a
 browser treats those as two different origins with two separate `localStorage` stores. Type on both
 and you will appear to have two unrelated histories. Pick `https://` and stay there.
+
+**Upgrading from v1.** A store written before the n-gram dimensions were removed is migrated in
+place: `bigrams`/`trigrams` are dropped and the per-character history is kept, so nothing needs
+exporting first. An exported v1 file imports the same way.

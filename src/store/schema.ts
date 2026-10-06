@@ -11,19 +11,48 @@ import type { Metric } from '../core/metrics';
 
 /**
  * How units are chosen for the next drill. Orthogonal to `DrillShape`, which is the
- * *format* of the drill: `shape` says "words or character groups", `mode` says "chosen
- * by weakness or uniformly". The settings UI labels them Words/Characters and
- * Adaptive/Uniform so the two never collide in front of the user.
+ * *format* of the drill: `shape` says "words, text or character groups", `mode` says
+ * "chosen by weakness or uniformly". The settings UI labels them Words/Text/Patterns
+ * and Adaptive/Uniform so the two never collide in front of the user.
  */
 export type TrainingMode = 'adaptive' | 'uniform';
+
+/**
+ * How the space between chunks is drawn. The space is a real target in every drill, but
+ * an empty box is invisible, so the marker is a display preference rather than
+ * decoration. All four are pure CSS on the same fixed-width span, so switching cannot
+ * reflow the drill.
+ */
+export type SpaceDisplay = 'blank' | 'dot' | 'bar' | 'dash';
+
+/**
+ * Every space-marker choice, in settings order. `SPACE_DISPLAY_LABELS` is what the UI
+ * shows; the CSS keys off `data-space`.
+ */
+export const SPACE_DISPLAYS: readonly SpaceDisplay[] = ['blank', 'dot', 'bar', 'dash'];
+
+export const SPACE_DISPLAY_LABELS: Readonly<Record<SpaceDisplay, string>> = {
+  blank: 'Blank',
+  dot: 'Dot',
+  bar: 'Bar',
+  dash: 'Dash',
+};
+
+export function isSpaceDisplay(value: unknown): value is SpaceDisplay {
+  return typeof value === 'string' && (SPACE_DISPLAYS as readonly string[]).includes(value);
+}
 
 export interface Settings {
   charsets: CharsetId[];
   groupCount: number;
-  /** Optional: exports written before the word list existed must still validate. */
+  /** Optional: exports written before the source control existed must still validate. */
   shape?: DrillShape;
   /** Optional: exports written before adaptive weighting must still validate. */
   mode?: TrainingMode;
+  /** Optional: exports written before the space marker was configurable. */
+  spaceDisplay?: SpaceDisplay;
+  /** Optional: the next-key finger hint panel. */
+  nextKey?: boolean;
 }
 
 export function preferredShape(settings: Settings): DrillShape {
@@ -34,16 +63,16 @@ export function preferredMode(settings: Settings): TrainingMode {
   return settings.mode ?? 'adaptive';
 }
 
+export function preferredSpaceDisplay(settings: Settings): SpaceDisplay {
+  return settings.spaceDisplay ?? 'bar';
+}
+
+export function preferredNextKey(settings: Settings): boolean {
+  return settings.nextKey ?? true;
+}
+
 /** Metric keys that every aggregate map must have. */
-export const METRIC_MAP_KEYS = [
-  'unigrams',
-  'bigrams',
-  'trigrams',
-  'byFinger',
-  'byHand',
-  'byShifted',
-  'byKind',
-] as const;
+export const METRIC_MAP_KEYS = ['unigrams', 'byFinger', 'byHand', 'byShifted', 'byKind'] as const;
 
 export type MetricMapKey = (typeof METRIC_MAP_KEYS)[number];
 
@@ -54,8 +83,6 @@ export interface Aggregates {
   totalSessions: number;
   totalKeystrokes: number;
   unigrams: Record<string, Metric>;
-  bigrams: Record<string, Metric>;
-  trigrams: Record<string, Metric>;
   byFinger: Record<string, Metric>;
   byHand: Record<string, Metric>;
   byShifted: Record<string, Metric>;
@@ -64,7 +91,6 @@ export interface Aggregates {
 
 export interface WorstUnit {
   unit: string;
-  kind: 'uni' | 'bi';
   attempts: number;
   errors: number;
 }
@@ -100,6 +126,8 @@ export function defaultSettings(): Settings {
     groupCount: DEFAULT_GROUP_COUNT,
     shape: 'words',
     mode: 'adaptive',
+    spaceDisplay: 'bar',
+    nextKey: true,
   };
 }
 
@@ -111,8 +139,6 @@ export function emptyAggregates(now: number): Aggregates {
     totalSessions: 0,
     totalKeystrokes: 0,
     unigrams: {},
-    bigrams: {},
-    trigrams: {},
     byFinger: {},
     byHand: {},
     byShifted: {},
@@ -189,11 +215,19 @@ export function isSettings(value: unknown): value is Settings {
     return false;
   }
   const shape = value['shape'];
-  if (shape !== undefined && shape !== 'words' && shape !== 'uniform') {
+  if (shape !== undefined && shape !== 'words' && shape !== 'text' && shape !== 'patterns') {
     return false;
   }
   const mode = value['mode'];
-  return mode === undefined || mode === 'adaptive' || mode === 'uniform';
+  if (mode !== undefined && mode !== 'adaptive' && mode !== 'uniform') {
+    return false;
+  }
+  const spaceDisplay = value['spaceDisplay'];
+  if (spaceDisplay !== undefined && !isSpaceDisplay(spaceDisplay)) {
+    return false;
+  }
+  const nextKey = value['nextKey'];
+  return nextKey === undefined || typeof nextKey === 'boolean';
 }
 
 export function isWorstUnit(value: unknown): value is WorstUnit {
@@ -201,9 +235,6 @@ export function isWorstUnit(value: unknown): value is WorstUnit {
     return false;
   }
   if (typeof value['unit'] !== 'string') {
-    return false;
-  }
-  if (value['kind'] !== 'uni' && value['kind'] !== 'bi') {
     return false;
   }
   return isFiniteNumber(value['attempts']) && isFiniteNumber(value['errors']);
@@ -245,7 +276,7 @@ export function isSessionSummary(value: unknown): value is SessionSummary {
     return false;
   }
   const shape = value['shape'];
-  return shape === undefined || shape === 'words' || shape === 'uniform';
+  return shape === undefined || shape === 'words' || shape === 'text' || shape === 'patterns';
 }
 
 export function isAggregates(value: unknown): value is Aggregates {

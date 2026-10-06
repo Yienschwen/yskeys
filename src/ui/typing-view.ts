@@ -1,16 +1,24 @@
 import { charStateAt, cursorIndex } from '../core/engine';
 import type { CharState, Judgement, SessionState } from '../core/engine';
 import type { Drill } from '../core/generator';
+import { isSpaceDisplay } from '../store/schema';
+import type { SpaceDisplay } from '../store/schema';
 import { h } from './dom';
 
 /**
  * Renders one drill. Every character gets a fixed-width span whose class changes in
  * place, so no state change can reflow the line (DESIGN.md §2.3).
  *
- * Groups are separated by a real space character, not by decoration: the space is a
- * target the user has to type, and the span for it draws a low bar because an empty
- * box would be invisible. Groups are variable length, so the active group is found by
- * range rather than by dividing the cursor by a fixed size.
+ * In the words and patterns shapes the chunks are separated by a real space character,
+ * not by decoration: the space is a target the user has to type, and its span draws a
+ * marker because an empty box would be invisible. Which marker is a user setting
+ * (`spaceDisplay` on the drill element); all four are pure CSS on the same fixed-width
+ * span, so switching never reflows the drill.
+ *
+ * In the text shape a newline is a target of its own and it *ends a visual line*, which
+ * is the whole point of practising code. Its span is a zero-width marker followed by a
+ * `flex-basis: 100%` break, so the code keeps its shape without any width arithmetic
+ * depending on the marker style.
  */
 
 const STATE_CLASS: Record<CharState, string> = {
@@ -28,12 +36,24 @@ export interface TypingView {
   render(state: SessionState, judgement: Judgement | null): void;
 }
 
-export function createTypingView(drill: Drill): TypingView {
+export interface TypingViewOptions {
+  readonly spaceDisplay?: SpaceDisplay;
+}
+
+/** The three kinds of target a drill can contain. */
+type CharKind = 'char' | 'space' | 'newline';
+
+export function createTypingView(drill: Drill, options: TypingViewOptions = {}): TypingView {
   viewCounter += 1;
   const statusId = `drill-status-${String(viewCounter)}`;
+  const spaceDisplay =
+    options.spaceDisplay !== undefined && isSpaceDisplay(options.spaceDisplay)
+      ? options.spaceDisplay
+      : 'bar';
 
   const element = h('div', 'typing');
   const drillElement = h('div', 'drill');
+  drillElement.dataset['space'] = spaceDisplay;
   drillElement.setAttribute('role', 'application');
   drillElement.setAttribute(
     'aria-label',
@@ -47,36 +67,68 @@ export function createTypingView(drill: Drill): TypingView {
   drillElement.setAttribute('aria-describedby', statusId);
 
   const charElements: HTMLElement[] = [];
-  const spaceFlags: boolean[] = [];
+  const charKinds: CharKind[] = [];
   const groupElements: HTMLElement[] = [];
   const groupRanges: Array<{ start: number; end: number }> = [];
+  const separator = drill.separator;
 
   let offset = 0;
-  const lastGroup = drill.groups.length - 1;
+  let groupElement: HTMLElement | null = null;
+  let groupStart = 0;
 
-  drill.groups.forEach((word, index) => {
-    const start = offset;
-    const groupElement = h('span', 'group');
-    for (const char of word) {
+  const closeGroup = (): void => {
+    if (groupElement === null) {
+      return;
+    }
+    groupElements.push(groupElement);
+    groupRanges.push({ start: groupStart, end: offset });
+    groupElement = null;
+  };
+
+  drill.groups.forEach((chunk, chunkIndex) => {
+    if (chunkIndex > 0 && separator.length > 0) {
+      // The separator is a real target: in the words and patterns shapes it is the
+      // space between chunks, and the user has to type it.
+      closeGroup();
+      for (const char of separator) {
+        const separatorElement = h('span', 'ch ch--space', char);
+        charElements.push(separatorElement);
+        charKinds.push('space');
+        drillElement.append(separatorElement);
+        offset += 1;
+      }
+    }
+
+    if (chunk === '\n') {
+      closeGroup();
+      const breakElement = h('span', 'ch ch--newline');
+      charElements.push(breakElement);
+      charKinds.push('newline');
+      drillElement.append(breakElement);
+      offset += 1;
+      return;
+    }
+
+    if (groupElement === null) {
+      groupElement = h('span', 'group');
+      groupStart = offset;
+    }
+    for (const char of chunk) {
       const charElement = h('span', 'ch', char);
       charElements.push(charElement);
-      spaceFlags.push(false);
+      charKinds.push('char');
       groupElement.append(charElement);
       offset += 1;
     }
-    groupElements.push(groupElement);
     drillElement.append(groupElement);
-
-    if (index < lastGroup) {
-      const spaceElement = h('span', 'ch ch--space', ' ');
-      charElements.push(spaceElement);
-      spaceFlags.push(true);
-      drillElement.append(spaceElement);
-      offset += 1;
-    }
-
-    groupRanges.push({ start, end: offset });
   });
+  closeGroup();
+
+  // The group list is built in target order, so its ranges line up with the character
+  // spans even when a line break sits between two groups.
+  if (groupElements.length !== groupRanges.length) {
+    throw new Error('drill rendering lost a group');
+  }
 
   element.append(drillElement, status);
 
@@ -114,7 +166,7 @@ export function createTypingView(drill: Drill): TypingView {
           charState,
           isCurrent,
           pending,
-          spaceFlags[index] === true,
+          charKinds[index] ?? 'char',
         );
         previousStates[index] = charState;
         previousCurrent[index] = isCurrent;
@@ -125,9 +177,9 @@ export function createTypingView(drill: Drill): TypingView {
     const groupKey = `${String(activeGroup)}:${String(state.status === 'running')}`;
     if (groupKey !== previousGroupKey) {
       const running = state.status === 'running';
-      groupElements.forEach((groupElement, index) => {
-        groupElement.classList.toggle('is-active', running && index === activeGroup);
-        groupElement.classList.toggle('is-done', index < activeGroup);
+      groupElements.forEach((group, index) => {
+        group.classList.toggle('is-active', running && index === activeGroup);
+        group.classList.toggle('is-done', index < activeGroup);
       });
       previousGroupKey = groupKey;
       const active = groupElements[activeGroup];
@@ -147,11 +199,13 @@ function classFor(
   state: CharState,
   isCurrent: boolean,
   pending: boolean,
-  space: boolean,
+  kind: CharKind,
 ): string {
   const parts = ['ch'];
-  if (space) {
+  if (kind === 'space') {
     parts.push('ch--space');
+  } else if (kind === 'newline') {
+    parts.push('ch--newline');
   }
   const stateClass = STATE_CLASS[state];
   if (stateClass) {
@@ -188,5 +242,14 @@ function announce(state: SessionState, judgement: Judgement | null, cursor: numb
 }
 
 function describe(char: string): string {
-  return char === ' ' ? 'space' : char;
+  if (char === ' ') {
+    return 'space';
+  }
+  if (char === '\n') {
+    return 'Enter';
+  }
+  if (char === '\t') {
+    return 'Tab';
+  }
+  return char;
 }

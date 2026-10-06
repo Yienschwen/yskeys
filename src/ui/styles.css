@@ -68,6 +68,18 @@
   --warning: var(--c-amber-800);
   --warning-subtle: var(--c-amber-50);
 
+  /* Finger hues. Eight distinguishable tints plus the thumb; every one also carries a
+     shape cue, so the diagram survives grayscale and forced colors. */
+  --finger-l-pinky: #fbcfe8;
+  --finger-l-ring: #fed7aa;
+  --finger-l-middle: #fde68a;
+  --finger-l-index: #bbf7d0;
+  --finger-r-index: #a5f3fc;
+  --finger-r-middle: #bfdbfe;
+  --finger-r-ring: #ddd6fe;
+  --finger-r-pinky: #f5d0fe;
+  --finger-thumb: var(--surface-2);
+
   /* Type. */
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -127,6 +139,17 @@
     --error-subtle: var(--c-red-950);
     --warning: var(--c-amber-400);
     --warning-subtle: var(--c-amber-950);
+
+    /* Muted so the text on every key stays readable on a dark page. */
+    --finger-l-pinky: #4a2a3c;
+    --finger-l-ring: #4a3524;
+    --finger-l-middle: #47401f;
+    --finger-l-index: #1f4030;
+    --finger-r-index: #1c3f47;
+    --finger-r-middle: #23374f;
+    --finger-r-ring: #33305a;
+    --finger-r-pinky: #3f2a52;
+    --finger-thumb: var(--surface-2);
   }
 }
 
@@ -387,20 +410,43 @@ ul {
   opacity: 0.55;
 }
 
-/* The space bar: an empty box would be invisible, so it draws a low bar that takes the
-   same state colours as a character. The gap around it is the space itself. */
+/* The space bar: an empty box would be invisible, so its span draws a marker that takes
+   the same state colours as a character. Which marker is the `data-space` setting on
+   `.drill`; all four occupy the same fixed width, so switching never reflows the line.
+   The gap around it is the space itself. */
 .ch--space {
   min-width: 0.5em;
 }
 
 .ch--space::after {
-  content: '';
   display: block;
   width: 0.28em;
   height: 2px;
   margin: 0.34em auto 0;
   background: var(--border-strong);
   border-radius: 1px;
+  content: '';
+}
+
+/* Dot: a centred pill, the classic "here is a space" mark. */
+.drill[data-space='dot'] .ch--space::after {
+  width: 0.2em;
+  height: 0.2em;
+  margin: 0.55em auto 0;
+  border-radius: 50%;
+}
+
+/* Dash: a wide low rule, for people who want the space to read as a slot. */
+.drill[data-space='dash'] .ch--space::after {
+  width: 0.42em;
+  height: 1px;
+  margin: 0.62em auto 0;
+}
+
+/* Blank: no marker at all. The current-position highlight is the only cue left, which
+   is exactly what "blank" is asking for. */
+.drill[data-space='blank'] .ch--space::after {
+  content: none;
 }
 
 .ch--space.is-ok::after {
@@ -417,6 +463,51 @@ ul {
 
 .ch--space.is-current::after {
   background: var(--accent);
+}
+
+/* A newline target in the text/code shape. The span itself has no width: it shows a
+   return glyph and then ends the visual line, so the source keeps its shape without the
+   marker style being able to move anything. */
+.ch--newline {
+  display: flex;
+  flex-basis: 100%;
+  align-items: flex-end;
+  justify-content: flex-start;
+  width: 0;
+  min-width: 0;
+  height: 0.55em;
+}
+
+.ch--newline::after {
+  content: '⏎';
+  margin-inline-start: 0.05em;
+  color: var(--border-strong);
+  font-size: 0.42em;
+  line-height: 1;
+}
+
+.ch--newline.is-ok::after {
+  color: var(--text-faint);
+}
+
+.ch--newline.is-bad::after {
+  color: var(--error);
+}
+
+.ch--newline.is-fixed::after {
+  color: var(--warning);
+}
+
+.ch--newline.is-current::after {
+  color: var(--accent);
+}
+
+.ch--newline.is-current {
+  background: var(--accent-subtle);
+}
+
+.ch--newline.is-bad {
+  background: var(--error-subtle);
 }
 
 .legend {
@@ -743,6 +834,19 @@ ul {
   background: var(--surface);
 }
 
+/* A paste box under the text-source buttons. */
+.paste {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block-start: var(--space-3);
+  max-width: 44rem;
+}
+
+.paste .button {
+  align-self: flex-start;
+}
+
 /* One row per concern inside the "Your data" panel. */
 .data-row + .data-row {
   padding-block-start: var(--space-4);
@@ -777,6 +881,148 @@ ul {
 .input:focus-visible,
 .textarea:focus-visible {
   border-color: var(--accent-border);
+}
+
+/* ------------------------------------------------------ 5h2. finger hint */
+
+.finger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.finger[hidden] {
+  display: none;
+}
+
+.finger__reading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 14rem;
+  flex: 1 1 14rem;
+}
+
+.finger__label {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.finger__detail {
+  max-width: 42ch;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The diagram is decorative: the sentence above it is the accessible answer, so the
+   whole keyboard is hidden from assistive technology. */
+.finger__keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 22rem;
+  max-width: 34rem;
+}
+
+.finger__row {
+  display: grid;
+  gap: 3px;
+}
+
+.finger__key {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.5rem;
+  background: var(--surface-2);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.finger__key--wide {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+}
+
+/* Consistent finger tint on every key. The border is the grayscale-safe cue. */
+.finger__key.is-l-pinky {
+  background: var(--finger-l-pinky);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-r-pinky {
+  background: var(--finger-r-pinky);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-l-ring {
+  background: var(--finger-l-ring);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-l-middle {
+  background: var(--finger-l-middle);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-l-index {
+  background: var(--finger-l-index);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-r-index {
+  background: var(--finger-r-index);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-r-middle {
+  background: var(--finger-r-middle);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-r-ring {
+  background: var(--finger-r-ring);
+  border-color: var(--border-strong);
+}
+
+.finger__key.is-thumb {
+  background: var(--finger-thumb);
+}
+
+/* The next key: filled with its finger tint, plus a heavy border and a left bar, so
+   the answer never depends on telling two similar tints apart. */
+.finger__key.is-next {
+  border-color: var(--accent);
+  border-width: var(--border-w-strong);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.finger__key.is-next::before {
+  content: '';
+  position: absolute;
+  width: 2px;
+  height: 60%;
+  margin-inline-start: -1.1rem;
+  background: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .finger__keyboard {
+    max-width: none;
+  }
 }
 
 /* -------------------------------------------------------------- 5i. chart */
@@ -908,6 +1154,24 @@ ul {
 @media (forced-colors: active) {
   .ch.is-bad {
     border-bottom-color: Mark;
+  }
+
+  .ch--newline.is-current,
+  .ch--newline.is-bad {
+    background: transparent;
+  }
+
+  .finger__key {
+    background: Canvas;
+  }
+
+  .finger__key.is-next {
+    border-color: Highlight;
+    box-shadow: none;
+  }
+
+  .finger__key.is-next::before {
+    background: Highlight;
   }
 
   .ch.is-fixed {

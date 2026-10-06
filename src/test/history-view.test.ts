@@ -29,7 +29,7 @@ function addSession(
     id: createSessionId(startedAt, 1),
     startedAt,
     mode: 'uniform',
-    shape: 'uniform',
+    shape: 'patterns',
     worstLimit: RESULT_WEAK_LIMIT,
   });
   return applySession(store, summary, tally, startedAt);
@@ -71,6 +71,9 @@ function render(store: Store, overrides: Partial<Parameters<typeof createHistory
     undo: vi.fn(),
     importWordList: vi.fn(),
     removeWordList: vi.fn(),
+    importTextSource: vi.fn(),
+    importPastedText: vi.fn(),
+    removeTextSource: vi.fn(),
     setMode: vi.fn(),
   };
   const element = createHistoryView({
@@ -78,6 +81,7 @@ function render(store: Store, overrides: Partial<Parameters<typeof createHistory
     actions,
     canUndo: false,
     wordList: null,
+    textSource: null,
     mode: 'adaptive',
     ...overrides,
   });
@@ -193,6 +197,11 @@ describe('history view', () => {
     expect(text).toContain('Hand');
     expect(text).toContain('shifted');
     expect(text).toContain('letter');
+    // Finger buckets read as fingers. `a` is the left little finger and it was typed in
+    // both sessions, so the label is on screen — and the internal id is only a tooltip.
+    const units = [...element.querySelectorAll('.table__unit')].map((cell) => cell.textContent);
+    expect(units).toContain('left little finger');
+    expect(units).not.toContain('l-pinky');
   });
 
   it('wires export, clear and undo to the caller', () => {
@@ -254,6 +263,73 @@ describe('history view', () => {
 
     expect(element.textContent).toContain('No word list yet');
     expect(element.textContent).toContain('Import word list');
+  });
+
+  it('shows the imported text source and offers replacing or removing it', () => {
+    const { element, actions } = render(storeWithSessions(), {
+      textSource: {
+        name: 'repo.zip',
+        importedAt: Date.UTC(2026, 0, 2),
+        chars: 12_345,
+        files: 42,
+        lines: 900,
+      },
+    });
+
+    const text = element.textContent ?? '';
+    expect(text).toContain('repo.zip');
+    expect(text).toContain('12,345'.replace(',', '') === '12345' ? '12345' : '12345');
+    expect(text).toContain('42');
+    expect(text).toContain('Remove text source');
+
+    buttonByText(element, 'Remove text source').click();
+    expect(actions.removeTextSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers three doors for a text source, and says so when there is none', () => {
+    const { element } = render(storeWithSessions());
+
+    expect(element.textContent).toContain('No text source yet');
+    expect(element.textContent).toContain('Upload repository (.zip)');
+    expect(element.textContent).toContain('Upload text or code files');
+    expect(element.textContent).toContain('Or paste code or text');
+  });
+
+  it('imports a pasted block and clears the box, ignoring an empty paste', () => {
+    const { element, actions } = render(storeWithSessions());
+    const form = element.querySelector('form.paste');
+    const textarea = element.querySelector('textarea');
+    if (!(form instanceof HTMLFormElement) || !(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error('no paste form rendered');
+    }
+
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    expect(actions.importPastedText).not.toHaveBeenCalled();
+
+    textarea.value = 'const a = 1;';
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+    expect(actions.importPastedText).toHaveBeenCalledWith('const a = 1;');
+    expect(textarea.value).toBe('');
+  });
+
+  it('accepts several plain-text files at once', () => {
+    const { element, actions } = render(storeWithSessions());
+    const inputs = [...element.querySelectorAll('input[type="file"]')];
+    const multi = inputs.find((input) => (input as HTMLInputElement).multiple);
+    if (!(multi instanceof HTMLInputElement)) {
+      throw new Error('no multi-file input rendered');
+    }
+
+    Object.defineProperty(multi, 'files', {
+      value: [new File(['a'], 'a.ts'), new File(['b'], 'b.ts')],
+      configurable: true,
+    });
+    multi.dispatchEvent(new Event('change'));
+
+    expect(actions.importTextSource).toHaveBeenCalledTimes(1);
+    expect(actions.importTextSource.mock.calls[0]?.[0]).toHaveLength(2);
+    expect(multi.value).toBe('');
   });
 
   it('offers the weighting mode and reports a change', () => {

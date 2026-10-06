@@ -13,12 +13,49 @@ import { createRng, randomInt } from './random';
 import type { Rng } from './random';
 
 /**
- * Drill generation. Two shapes: real words from a list the user imported, and the
- * uniform character groups that M1 shipped. M3 adds weighted sampling on top; both
- * shapes keep the same `Drill` contract, so nothing downstream cares.
+ * Drill generation. Three shapes share one contract (`Drill`), so nothing downstream
+ * cares which one produced the target:
+ *
+ *  - **words** — every chunk is a real word from the list the user imported,
+ *  - **text** — every chunk is a run of characters from the user's own text or code,
+ *    with newlines kept as their own chunks so the source's line structure survives,
+ *  - **patterns** — random character groups from the enabled character sets.
+ *
+ * In adaptive mode a unit is drawn by weakness and then *materialized* into a chunk of
+ * the chosen shape. In uniform mode the pattern/word generators run without weighting,
+ * which is the control that shows whether the adaptive part does anything at all.
  */
 
-export type DrillShape = 'words' | 'uniform';
+export type DrillShape = 'words' | 'text' | 'patterns';
+
+export const DRILL_SHAPES: readonly DrillShape[] = ['words', 'text', 'patterns'];
+
+/**
+ * Raised when the chosen shape cannot produce anything (an empty word pool, an empty
+ * text source, an empty list). The caller falls back to another shape rather than
+ * refusing to start a session.
+ */
+export class EmptyDrillSourceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmptyDrillSourceError';
+  }
+}
+
+export interface Drill {
+  /**
+   * The units of display and of line wrapping (DESIGN.md §2.3). In the words shape they
+   * are separated by a real space in `text`; in the text shape the source supplies its
+   * own separators. Either way the gap is not decoration.
+   */
+  readonly groups: readonly string[];
+  /** The exact string to type, character for character. */
+  readonly text: string;
+  /** What the caller should join `groups` with, for rendering. */
+  readonly separator: string;
+  /** Chunks that are a line break rather than content. */
+  readonly lineBreaks: number;
+}
 
 export interface SessionSpec {
   readonly charsets: readonly CharsetId[];
@@ -27,20 +64,10 @@ export interface SessionSpec {
   readonly seed: number;
 }
 
-export interface Drill {
-  /**
-   * Groups are the unit of display and of line wrapping (DESIGN.md §2.3). They are
-   * separated by a real space in `text`, which is typed and counted like any other
-   * character — the gap between groups is not decoration.
-   */
-  readonly groups: readonly string[];
-  readonly text: string;
-}
-
 export function buildUniformDrill(spec: SessionSpec): Drill {
   const pool = charsFor(spec.charsets);
   if (pool.length === 0) {
-    throw new Error('cannot build a drill from an empty charset selection');
+    throw new EmptyDrillSourceError('cannot build a drill from an empty charset selection');
   }
   if (!Number.isInteger(spec.groupCount) || spec.groupCount <= 0) {
     throw new Error(`groupCount must be a positive integer, got ${String(spec.groupCount)}`);
@@ -63,7 +90,7 @@ export function buildUniformDrill(spec: SessionSpec): Drill {
     groups.push(group);
   }
 
-  return { groups, text: groups.join(' ') };
+  return { groups, text: groups.join(' '), separator: ' ', lineBreaks: 0 };
 }
 
 /**
@@ -83,7 +110,7 @@ function pickDifferent(pool: string, avoid: string, rng: Rng): string {
   return candidate;
 }
 
-/* ---------------------------------------------------------------- words -- */
+/* ------------------------------------------------------------------ word list -- */
 
 export interface WordDrillSpec {
   readonly charsets: readonly CharsetId[];
@@ -134,9 +161,8 @@ export function isWordListUsable(words: readonly string[], charsets: readonly Ch
 
 export function buildWordDrill(spec: WordDrillSpec): Drill {
   const pool = usableWords(spec.words, spec.charsets);
-  const first = pool[0];
-  if (first === undefined) {
-    throw new Error('cannot build a word drill without usable words');
+  if (pool.length === 0) {
+    throw new EmptyDrillSourceError('cannot build a word drill without usable words');
   }
 
   const mode = caseModeFor(spec.charsets);
@@ -156,7 +182,7 @@ export function buildWordDrill(spec: WordDrillSpec): Drill {
     chars += text.length;
   }
 
-  return { groups, text: groups.join(' ') };
+  return { groups, text: groups.join(' '), separator: ' ', lineBreaks: 0 };
 }
 
 type CaseMode = 'lower' | 'upper' | 'title-sometimes';
@@ -191,7 +217,7 @@ function applyCase(word: string, mode: CaseMode, rng: Rng): string {
 function pickWord(pool: readonly string[], avoid: string, rng: Rng): string {
   const fallback = pool[0];
   if (fallback === undefined) {
-    throw new Error('empty word pool');
+    throw new EmptyDrillSourceError('empty word pool');
   }
   for (let attempt = 0; attempt < 16; attempt += 1) {
     const candidate = pool[randomInt(rng, pool.length)];
@@ -202,41 +228,52 @@ function pickWord(pool: readonly string[], avoid: string, rng: Rng): string {
   return fallback;
 }
 
-/* -------------------------------------------------------------- adaptive -- */
+/* -------------------------------------------------------------------- indexing -- */
 
 /**
- * Maps every character and every adjacent pair in the list to the words containing it.
- * One pass over the list, and from then on "give me a word with `q` in it" is a lookup.
+ * Maps every character, and every adjacent pair, in the chunks to the chunks containing
+ * them. One pass over the source, and from then on "give me a chunk with `q` in it" is a
+ * lookup — which is the only way a rare key is ever practised, given that only 99 of
+ * EFF's 7776 words contain a `q`.
+ *
+ * Only single characters are ever *drawn* (a pair would re-count the same keystroke as
+ * evidence), but pairs are indexed all the same: it costs one pass here and it is what
+ * makes "does any chunk contain this run" a lookup rather than a scan.
  */
-export function buildWordIndex(words: readonly string[]): Map<string, number[]> {
+export function buildUnitIndex(chunks: readonly string[]): Map<string, number[]> {
   const index = new Map<string, number[]>();
-  words.forEach((word, wordIndex) => {
-    for (let position = 0; position < word.length; position += 1) {
-      addToIndex(index, word.charAt(position), wordIndex);
-      if (position + 2 <= word.length) {
-        addToIndex(index, word.slice(position, position + 2), wordIndex);
+  chunks.forEach((chunk, chunkIndex) => {
+    for (let position = 0; position < chunk.length; position += 1) {
+      addToIndex(index, chunk.charAt(position), chunkIndex);
+      if (position + 2 <= chunk.length) {
+        addToIndex(index, chunk.slice(position, position + 2), chunkIndex);
       }
     }
   });
   return index;
 }
 
-/** Words are walked in order, so a repeated unit inside one word is always the tail. */
-function addToIndex(index: Map<string, number[]>, unit: string, wordIndex: number): void {
+/** Contents are walked in order, so a repeated unit inside one chunk is the tail. */
+function addToIndex(index: Map<string, number[]>, unit: string, chunkIndex: number): void {
   const list = index.get(unit);
   if (list === undefined) {
-    index.set(unit, [wordIndex]);
+    index.set(unit, [chunkIndex]);
     return;
   }
-  if (list[list.length - 1] !== wordIndex) {
-    list.push(wordIndex);
+  if (list[list.length - 1] !== chunkIndex) {
+    list.push(chunkIndex);
   }
 }
+
+/* ---------------------------------------------------------------- adaptive drill -- */
 
 export interface MaterializeContext {
   readonly shape: DrillShape;
   readonly charsets: readonly CharsetId[];
+  /** Word list for the words shape; ignored by the others. */
   readonly words: readonly string[];
+  /** Pre-built chunks for the text shape, in source order. */
+  readonly sourceChunks: readonly string[];
   readonly index: ReadonlyMap<string, readonly number[]>;
   readonly rng: Rng;
 }
@@ -244,26 +281,40 @@ export interface MaterializeContext {
 /**
  * Turns a drawn unit into actual drill text.
  *
- * In the words shape the unit is guaranteed to appear, which is the whole point: it is
- * the only way a rarely used key gets practised at all, given that only 99 of EFF's 7776
- * words contain a `q`.
+ * In the words and text shapes the unit is guaranteed to appear, which is the whole
+ * point of drawing it by weakness.
  */
 export function materializeUnit(
   unit: string,
   context: MaterializeContext,
   avoidText?: string,
 ): string {
-  // 'uniform' is the character-group *format* here, not the weighting mode.
-  if (context.shape === 'uniform') {
+  if (context.shape === 'patterns') {
     return embedUnit(unit, context.charsets, context.rng);
   }
-  const word = wordForUnit(context.index.get(unit), context.words, context.rng, avoidText);
-  return word ?? randomWord(context.words, context.rng, avoidText) ?? unit;
+  const pool = context.shape === 'text' ? context.sourceChunks : context.words;
+  const chunk = chunkForUnit(context.index.get(unit), pool, context.rng, avoidText);
+  if (chunk !== null) {
+    return context.shape === 'text' ? chunk : applyWordCase(chunk, context, avoidText);
+  }
+  return randomChunk(pool, context.rng, avoidText) ?? unit;
 }
 
 /**
- * Filler is only ever added before or after the unit, never inside it: splitting a
- * bigram would mean the drill no longer contains the thing that was drawn.
+ * Words are cased at materialization time so a drawn unit is still found in the
+ * lowercase list. The text shape is passed through untouched: its case is the point.
+ */
+function applyWordCase(word: string, context: MaterializeContext, avoidText?: string): string {
+  const mode = caseModeFor(context.charsets);
+  // Re-drawing a word that differs only by case would look like a repeat, so a cased
+  // word that matches the previous chunk falls back to the plain one.
+  const cased = applyCase(word, mode, context.rng);
+  return cased === avoidText ? word : cased;
+}
+
+/**
+ * Filler is only ever added before or after the unit, never inside it: splitting a pair
+ * would mean the drill no longer contains the thing that was drawn.
  */
 export function embedUnit(unit: string, charsets: readonly CharsetId[], rng: Rng): string {
   if (rng() >= EMBED_PROBABILITY) {
@@ -291,9 +342,9 @@ export function embedUnit(unit: string, charsets: readonly CharsetId[], rng: Rng
   return before + unit + after;
 }
 
-function wordForUnit(
+function chunkForUnit(
   list: readonly number[] | undefined,
-  words: readonly string[],
+  pool: readonly string[],
   rng: Rng,
   avoidText?: string,
 ): string | null {
@@ -302,61 +353,78 @@ function wordForUnit(
   }
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const index = list[randomInt(rng, list.length)];
-    const word = index === undefined ? undefined : words[index];
-    if (word !== undefined && word !== avoidText) {
-      return word;
+    const chunk = index === undefined ? undefined : pool[index];
+    if (chunk !== undefined && chunk !== avoidText && chunk !== '\n') {
+      return chunk;
     }
   }
   const first = list[0];
-  return first === undefined ? null : (words[first] ?? null);
+  return first === undefined ? null : (pool[first] ?? null);
 }
 
-function randomWord(
-  words: readonly string[],
+function randomChunk(
+  pool: readonly string[],
   rng: Rng,
   avoidText?: string,
 ): string | null {
-  if (words.length === 0) {
+  const usable = pool.filter((chunk) => chunk !== '\n');
+  if (usable.length === 0) {
     return null;
   }
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const word = words[randomInt(rng, words.length)];
-    if (word !== undefined && word !== avoidText) {
-      return word;
+    const chunk = usable[randomInt(rng, usable.length)];
+    if (chunk !== undefined && chunk !== avoidText) {
+      return chunk;
     }
   }
-  return words[0] ?? null;
+  return usable[0] ?? null;
 }
 
-export interface AdaptiveDrillSpec {
+export interface DrillSpec {
   readonly shape: DrillShape;
   readonly charsets: readonly CharsetId[];
-  /** Non-space characters to reach, for both shapes. */
+  /** Non-space characters to reach. */
   readonly targetChars: number;
+  /** Words for the words shape. */
   readonly words?: readonly string[];
+  /** Pre-extracted chunks for the text shape. */
+  readonly textChunks?: readonly string[];
   readonly source: AdaptiveSource;
   readonly seed: number;
 }
 
 /**
- * The adaptive session builder: draw a unit by weakness, then materialize it as a
- * character group or as a word that contains it.
+ * The adaptive session builder: draw a unit by weakness, then materialize it. Returns
+ * chunks and the separator to join them with, so the caller can render without knowing
+ * which shape ran.
  */
-export function buildAdaptiveDrill(spec: AdaptiveDrillSpec): Drill {
+export function buildAdaptiveDrill(spec: DrillSpec): Drill {
   const rng = createRng(spec.seed);
   const words = spec.words ?? [];
-  const index = spec.shape === 'words' ? buildWordIndex(words) : new Map<string, number[]>();
-  // Only units the materializer can actually produce are worth drawing.
-  const available = spec.shape === 'words' ? new Set(index.keys()) : undefined;
-  const pool = buildCandidates(spec.source, available);
-  if (pool.length === 0) {
-    throw new Error('no units are available to drill');
+  const sourceChunks = spec.textChunks ?? [];
+  const source = spec.shape === 'words' ? words : spec.shape === 'text' ? sourceChunks : [];
+  if (spec.shape !== 'patterns' && source.length === 0) {
+    throw new EmptyDrillSourceError(`no chunks are available for the ${spec.shape} shape`);
+  }
+
+  // A newline is a chunk in its own right — it is what keeps the source's line
+  // structure — but it is never what a drawn unit materializes into, so it is not
+  // indexed. The newlines still reach the target because the chunks are joined whole.
+  const index = buildUnitIndex(source.filter((chunk) => chunk !== '\n' && chunk !== ''));
+  // Only units the materializer can actually produce are worth drawing: the units of
+  // the source for words and text, the enabled characters for patterns.
+  const available =
+    spec.shape === 'patterns' ? undefined : new Set(index.keys());
+  const candidates = buildCandidates(spec.source, available);
+  if (candidates.length === 0) {
+    throw new EmptyDrillSourceError('no units are available to drill');
   }
 
   const context: MaterializeContext = {
     shape: spec.shape,
     charsets: spec.charsets,
     words,
+    sourceChunks,
     index,
     rng,
   };
@@ -365,11 +433,12 @@ export function buildAdaptiveDrill(spec: AdaptiveDrillSpec): Drill {
   const target = Math.max(1, Math.floor(spec.targetChars));
   const maxGroups = target + 100;
   let chars = 0;
+  let lineBreaks = 0;
   let previousUnit: string | undefined;
   let previousText: string | undefined;
 
   while (chars < target && groups.length < maxGroups) {
-    const candidate = sampleCandidate(pool, rng, {
+    const candidate = sampleCandidate(candidates, rng, {
       ...(previousUnit === undefined ? {} : { avoid: previousUnit }),
       uses,
     });
@@ -379,10 +448,18 @@ export function buildAdaptiveDrill(spec: AdaptiveDrillSpec): Drill {
     }
     groups.push(text);
     chars += text.length;
+    if (text === '\n') {
+      lineBreaks += 1;
+    }
     uses.set(candidate.unit, (uses.get(candidate.unit) ?? 0) + 1);
     previousUnit = candidate.unit;
     previousText = text;
   }
 
-  return { groups, text: groups.join(' ') };
+  // The text shape reproduces the source exactly, so nothing is inserted between
+  // chunks: a newline chunk is already the line break, and a run follows the previous
+  // one directly. The words and patterns shapes need the space, because it is the
+  // separator the user types.
+  const separator = spec.shape === 'text' ? '' : ' ';
+  return { groups, text: groups.join(separator), separator, lineBreaks };
 }

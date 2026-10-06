@@ -30,7 +30,7 @@ function storeWithSession(): Store {
     id: createSessionId(2000, 1),
     startedAt: 2000,
     mode: 'uniform',
-    shape: 'uniform',
+    shape: 'patterns',
     worstLimit: RESULT_WEAK_LIMIT,
   });
   return applySession(store, summary, tally, 3000);
@@ -50,6 +50,50 @@ function reasonOf(result: ParseResult): string {
 function withSettings(file: ExportFile, charsets: CharsetId[], groupCount: number): ExportFile {
   return { ...file, settings: { charsets, groupCount } };
 }
+
+describe('text source in an export', () => {
+  const source = {
+    name: 'repo.zip',
+    importedAt: 1234,
+    text: 'const a = 1;\nreturn a;',
+    stats: { bytes: 22, files: 3, skipped: 1, lines: 2 },
+  };
+
+  it('carries a text source and reads it back', () => {
+    const file = buildExportFile(defaultStore(1), 4000, APP_VERSION, undefined, source);
+    expect(file.textSource).toEqual(source);
+
+    const parsed = fileOf(parseExportFile(serializeExport(file)));
+    expect(parsed.textSource).toEqual(source);
+  });
+
+  it('leaves the field out entirely when there is no source', () => {
+    const file = buildExportFile(defaultStore(1), 4000, APP_VERSION);
+    expect('textSource' in file).toBe(false);
+    const parsed = fileOf(parseExportFile(serializeExport(file)));
+    expect(parsed.textSource).toBeUndefined();
+  });
+
+  it('rejects a malformed text source instead of trusting it', () => {
+    const file = buildExportFile(defaultStore(1), 4000, APP_VERSION, undefined, source);
+    for (const broken of [
+      { ...source, name: 7 },
+      { ...source, text: 7 },
+      { ...source, importedAt: 'yesterday' },
+      { ...source, stats: 'lots' },
+    ]) {
+      const result = parseExportFile(JSON.stringify({ ...file, textSource: broken }));
+      expect(result.ok, JSON.stringify(broken)).toBe(false);
+    }
+  });
+
+  it('accepts a text source with no stats block, since they are informational', () => {
+    const file = buildExportFile(defaultStore(1), 4000, APP_VERSION, undefined, source);
+    const { stats: _stats, ...withoutStats } = source;
+    const result = parseExportFile(JSON.stringify({ ...file, textSource: withoutStats }));
+    expect(result.ok).toBe(true);
+  });
+});
 
 describe('buildExportFile', () => {
   it('matches the documented export shape', () => {

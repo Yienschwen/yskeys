@@ -82,6 +82,22 @@ export function applyEvent(state: SessionState, event: SessionEvent): StepResult
   }
 }
 
+/**
+ * Whether a keydown is a typing attempt. `event.key` for a newline is `Enter`, which is
+ * six characters long, so length alone is not the test: a newline is a real target in
+ * the text/code shape, and it is judged like any other character. Everything else with
+ * a multi-character name is a modifier or a navigation key, never a character.
+ */
+export function isTypingKey(key: string): boolean {
+  return key.length === 1 || key === NEWLINE_KEY;
+}
+
+/** The `event.key` name of the newline character. */
+export const NEWLINE_KEY = 'Enter';
+
+/** The control character a newline target is stored as. */
+export const NEWLINE_CHAR = '\n';
+
 /** Index of the next character to type. Equals the number of characters displayed. */
 export function cursorIndex(state: SessionState): number {
   return state.typed.length;
@@ -117,17 +133,20 @@ function applyKey(
   if (state.status === 'done' || state.status === 'aborted' || state.status === 'paused') {
     return { state, judgement: 'ignored' };
   }
-  // Auto-repeat is not a typing attempt, and multi-character keys ('Shift', 'Tab')
-  // are not characters. The UI filters too; this is the backstop.
-  if (repeat || key.length !== 1) {
+  // Auto-repeat is not a typing attempt, and only `isTypingKey` names count as
+  // characters. The UI filters too; this is the backstop.
+  if (repeat || !isTypingKey(key)) {
     return { state, judgement: 'ignored' };
   }
 
   const index = state.typed.length;
   const expected = state.target.charAt(index);
-  const correct = key === expected;
+  // An `Enter` keystroke is the newline character, so it can only be correct where the
+  // target actually holds one.
+  const typedKey = key === NEWLINE_KEY ? NEWLINE_CHAR : key;
+  const correct = typedKey === expected;
   const clock = tick(state, at);
-  const typed = state.typed + key;
+  const typed = state.typed + typedKey;
 
   return {
     state: {
@@ -136,7 +155,7 @@ function applyKey(
       typed,
       firstAttempt:
         state.firstAttempt[index] === undefined
-          ? { ...state.firstAttempt, [index]: key }
+          ? { ...state.firstAttempt, [index]: typedKey }
           : state.firstAttempt,
       backspaces: state.backspaces,
       activeMs: clock.activeMs,

@@ -30,8 +30,6 @@ export function applySession(
     totalSessions: store.aggregates.totalSessions + 1,
     totalKeystrokes: store.aggregates.totalKeystrokes + tally.totals.attempts,
     unigrams: mergeMetricMaps(store.aggregates.unigrams, tally.unigrams),
-    bigrams: mergeMetricMaps(store.aggregates.bigrams, tally.bigrams),
-    trigrams: mergeMetricMaps(store.aggregates.trigrams, tally.trigrams),
     byFinger: mergeMetricMaps(store.aggregates.byFinger, tally.byFinger),
     byHand: mergeMetricMaps(store.aggregates.byHand, tally.byHand),
     byShifted: mergeMetricMaps(store.aggregates.byShifted, tally.byShifted),
@@ -66,7 +64,6 @@ export function buildSessionSummary(input: SessionSummaryInput): SessionSummary 
   const correct = tally.totals.firstTryCorrect;
   const worstUnits: WorstUnit[] = weakestUnits(tally, input.worstLimit).map((unit) => ({
     unit: unit.unit,
-    kind: unit.kind,
     attempts: unit.metric.attempts,
     errors: unit.errors,
   }));

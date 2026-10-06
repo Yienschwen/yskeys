@@ -11,17 +11,62 @@ import type { Store } from './schema';
 /**
  * Schema migrations.
  *
- * v1 is the first stored schema, so there is nothing to migrate yet. That is exactly
- * why `runMigrations` takes the migration table as a parameter: the mechanism is
- * exercised by tests with a synthetic chain, instead of rotting until the first real
- * version bump — at which point it would be discovered broken by a user's data.
+ * The mechanism takes the migration table as a parameter so it is exercised by tests
+ * with a synthetic chain, instead of rotting until the first real version bump.
+ *
+ * v1 stored `bigrams` and `trigrams` alongside `unigrams`. They were removed because a
+ * pair or triple re-counts the same keystroke as evidence and cannot be displayed as
+ * the thing being practised, so v2 drops both maps and keeps the per-character history.
  */
 
 /** Migrates the payload of the version in the key to the next version. */
 export type Migration = (raw: unknown) => unknown;
 
+/**
+ * v1 → v2: drop the n-gram dimensions and rename the character-group shape.
+ *
+ * Nothing is inferred from the n-gram maps, so there is no loss to migrate across: the
+ * per-character counters are untouched. The old `shape: 'uniform'` value meant "random
+ * character groups", which v2 calls `patterns` — renaming it here keeps an imported v1
+ * file describing the same drill.
+ *
+ * The rename has to happen on the session summaries too, not only in `settings`: v1
+ * stamped the shape that actually produced each session, and a session whose shape the
+ * validator rejects makes the whole payload unreadable — which would park a real
+ * history and start the user from zero on upgrade.
+ */
+const upgradeToV2: Migration = (raw) => {
+  if (!isRecord(raw)) {
+    return raw;
+  }
+  const settings = raw['settings'];
+  const aggregates = raw['aggregates'];
+  const sessions = raw['sessions'];
+  return {
+    ...raw,
+    schemaVersion: 2,
+    ...(isRecord(settings) ? { settings: normalizeShape(settings) } : {}),
+    ...(isRecord(aggregates) ? { aggregates: withoutNgramDimensions(aggregates) } : {}),
+    ...(Array.isArray(sessions) ? { sessions: sessions.map(normalizeSessionShape) } : {}),
+  };
+};
+
+/** `uniform` was v1's name for what v2 calls a character-group (`patterns`) drill. */
+function normalizeShape(value: Record<string, unknown>): Record<string, unknown> {
+  return value['shape'] === 'uniform' ? { ...value, shape: 'patterns' } : value;
+}
+
+function normalizeSessionShape(session: unknown): unknown {
+  return isRecord(session) ? normalizeShape(session) : session;
+}
+
+function withoutNgramDimensions(aggregates: Record<string, unknown>): Record<string, unknown> {
+  const { bigrams: _bigrams, trigrams: _trigrams, ...kept } = aggregates;
+  return kept;
+}
+
 /** Keyed by the version being migrated FROM. */
-export const MIGRATIONS: Readonly<Record<number, Migration>> = {};
+export const MIGRATIONS: Readonly<Record<number, Migration>> = { 1: upgradeToV2 };
 
 export type MigrationResult = { ok: true; value: unknown } | { ok: false; reason: string };
 
